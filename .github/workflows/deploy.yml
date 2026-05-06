@@ -1,5 +1,6 @@
 # P2P Mesh Network - CI/CD Pipeline
 # 推送 tag 时自动构建镜像并部署到服务器
+# Microservices architecture — builds 6 service images via matrix strategy.
 
 name: Build and Deploy
 
@@ -73,8 +74,62 @@ jobs:
           cargo install cargo-audit
           cargo audit || true  # Non-blocking: notify but don't fail build
 
-  # ---- 构建并推送镜像 ----
+  # ---- 构建并推送镜像（矩阵策略：6 个微服务） ----
   build-and-push:
+    needs: lint-and-test
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    strategy:
+      matrix:
+        service:
+          - service-name: auth-service
+            context: services/auth-service
+            dockerfile: services/auth-service/Dockerfile
+          - service-name: user-service
+            context: services/user-service
+            dockerfile: services/user-service/Dockerfile
+          - service-name: signaling-service
+            context: services/signaling-service
+            dockerfile: services/signaling-service/Dockerfile
+          - service-name: relay-service
+            context: services/relay-service
+            dockerfile: services/relay-service/Dockerfile
+          - service-name: usage-service
+            context: services/usage-service
+            dockerfile: services/usage-service/Dockerfile
+          - service-name: worker
+            context: services/worker
+            dockerfile: services/worker/Dockerfile
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Extract version tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Build & Push ${{ matrix.service.service-name }}
+        uses: docker/build-push-action@v5
+        with:
+          context: ${{ matrix.service.context }}
+          file: ${{ matrix.service.dockerfile }}
+          push: true
+          tags: |
+            ${{ env.DOCKER_REGISTRY }}/p2p-mesh-${{ matrix.service.service-name }}:latest
+            ${{ env.DOCKER_REGISTRY }}/p2p-mesh-${{ matrix.service.service-name }}:${{ steps.version.outputs.VERSION }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ---- 构建并推送 Relay image (Rust data-plane, separate from microservices) ----
+  build-and-push-relay:
     needs: lint-and-test
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
@@ -94,18 +149,6 @@ jobs:
         id: version
         run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
 
-      - name: Build & Push API image
-        uses: docker/build-push-action@v5
-        with:
-          context: ./control-plane
-          file: ./deployment/Dockerfile.api
-          push: true
-          tags: |
-            ${{ env.IMAGE_NAME_API }}:latest
-            ${{ env.IMAGE_NAME_API }}:${{ steps.version.outputs.VERSION }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
       - name: Build & Push Relay image
         uses: docker/build-push-action@v5
         with:
@@ -113,14 +156,14 @@ jobs:
           file: ./deployment/Dockerfile.relay
           push: true
           tags: |
-            ${{ env.IMAGE_NAME_RELAY }}:latest
-            ${{ env.IMAGE_NAME_RELAY }}:${{ steps.version.outputs.VERSION }}
+            ${{ env.DOCKER_REGISTRY }}/p2p-mesh-relay:latest
+            ${{ env.DOCKER_REGISTRY }}/p2p-mesh-relay:${{ steps.version.outputs.VERSION }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
   # ---- 部署到服务器 ----
   deploy:
-    needs: build-and-push
+    needs: [build-and-push, build-and-push-relay]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -133,6 +176,6 @@ jobs:
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           script: |
             cd /opt/p2p-mesh/deployment
-            docker compose -f docker-compose.prod.yml pull
-            docker compose -f docker-compose.prod.yml up -d --remove-orphans
+            docker compose -f docker-compose.microservices.prod.yml pull
+            docker compose -f docker-compose.microservices.prod.yml up -d --remove-orphans
             docker image prune -af
