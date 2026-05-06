@@ -1,10 +1,12 @@
 //! mesh-relay — P2P Mesh Network relay forwarding node.
 //!
-//! This binary runs on relay servers deployed across regions and:
-//! 1. Registers with the control plane
+//! Runs on relay servers deployed across regions and:
+//! 1. Connects to the control plane for health reporting
 //! 2. Accepts encrypted packets from mesh clients
 //! 3. Forwards packets between clients without decrypting (zero-trust)
 //! 4. Reports load and health metrics via heartbeat
+//!
+//! Security: Authenticates with RELAY_AUTH_TOKEN on heartbeat endpoints.
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -24,32 +26,36 @@ use mod_import::*;
 #[derive(Parser, Debug)]
 #[command(name = "mesh-relay")]
 struct Args {
-    /// Control plane API URL
-    #[arg(long, default_value = "http://localhost:8000")]
+    /// Control plane API URL — reads API_URL env var.
+    #[arg(long, env = "API_URL", default_value = "http://localhost:8000")]
     api_url: String,
 
-    /// Relay node ID (from control plane registration)
-    #[arg(long)]
+    /// Relay auth token — reads RELAY_AUTH_TOKEN env var.
+    #[arg(long, env = "RELAY_AUTH_TOKEN", hide_env_values = true)]
+    relay_auth_token: String,
+
+    /// Relay node ID — reads RELAY_ID env var.
+    #[arg(long, env = "RELAY_ID")]
     relay_id: String,
 
-    /// Region identifier (e.g., us-east-1, eu-west-1)
-    #[arg(long, default_value = "default")]
+    /// Region identifier — reads REGION env var.
+    #[arg(long, env = "REGION", default_value = "default")]
     region: String,
 
-    /// UDP port for relay traffic
-    #[arg(long, default_value = "51821")]
+    /// UDP port for relay traffic.
+    #[arg(long, env = "RELAY_PORT", default_value = "51821")]
     port: u16,
 
-    /// Maximum concurrent connections
-    #[arg(long, default_value = "1000")]
+    /// Maximum concurrent connections.
+    #[arg(long, env = "RELAY_MAX_CONNECTIONS", default_value = "1000")]
     max_connections: usize,
 
-    /// Bandwidth capacity in Mbps
-    #[arg(long, default_value = "1000")]
+    /// Bandwidth capacity in Mbps.
+    #[arg(long, env = "RELAY_BANDWIDTH_MBPS", default_value = "1000")]
     bandwidth_mbps: f64,
 
-    /// Heartbeat interval in seconds
-    #[arg(long, default_value = "30")]
+    /// Heartbeat interval in seconds.
+    #[arg(long, env = "HEARTBEAT_INTERVAL", default_value = "30")]
     heartbeat_interval: u64,
 }
 
@@ -63,56 +69,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         args.relay_id, args.region, args.port
     );
 
-    // Bind relay UDP socket
     let bind_addr: SocketAddr = format!("0.0.0.0:{}", args.port).parse()?;
     let socket = UdpSocket::bind(bind_addr).await?;
     let socket = Arc::new(socket);
     log::info!("Relay socket bound to {}", bind_addr);
 
-    // Initialize forwarding table
     let forwarding_table = Arc::new(ForwardingTable::new());
 
-    // Register with control plane
-    let client = reqwest::Client::new();
-    let local_ip = get_local_ip().unwrap_or_else(|| "127.0.0.1".to_string());
+    // Relays do NOT self-register — admin pre-creates them via the API.
+    // The relay only sends heartbeats authenticated via RELAY_AUTH_TOKEN.
 
-    let register_payload = serde_json::json!({
-        "name": format!("relay-{}", args.relay_id),
-        "ip": local_ip,
-        "port": args.port,
-        "region": args.region,
-        "max_capacity": args.max_connections,
-        "bandwidth_capacity_mbps": args.bandwidth_mbps,
-    });
-
-    match client
-        .post(format!("{}/api/v1/relay/register", args.api_url))
-        .json(&register_payload)
-        .send()
-        .await
-    {
-        Ok(resp) => {
-            if resp.status().is_success() {
-                log::info!("Registered with control plane successfully");
-            } else {
-                log::warn!("Registration returned: {}", resp.status());
-            }
-        }
-        Err(e) => log::error!("Registration failed: {}", e),
-    }
-
-    // Start the relay forwarding loop
     let relay_table = forwarding_table.clone();
     let relay_socket = socket.clone();
     let relay_task = tokio::spawn(async move {
         relay::relay_loop(relay_socket, relay_table).await;
     });
 
-    // Start the heartbeat loop
     let heartbeat_api = args.api_url.clone();
     let heartbeat_id = args.relay_id.clone();
     let heartbeat_interval = args.heartbeat_interval;
     let heartbeat_table = forwarding_table.clone();
+    let relay_token = args.relay_auth_token.clone();
+    let max_conn = args.max_connections;
 
     let heartbeat_task = tokio::spawn(async move {
         loop {
@@ -122,13 +100,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 heartbeat_table.get_stats().await;
 
             let load = (device_count as f64
-                / args.max_connections.max(1) as f64)
+                / max_conn.max(1) as f64)
                 .min(1.0);
 
             let payload = serde_json::json!({
                 "load": load,
                 "current_connections": device_count,
-                "bandwidth_used_mbps": 0.0, // Calculate from actual throughput
+                "bandwidth_used_mbps": 0.0,
             });
 
             match client
@@ -136,6 +114,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     "{}/api/v1/relay/{}/heartbeat",
                     heartbeat_api, heartbeat_id
                 ))
+                .header("Authorization", format!("Bearer {}", relay_token))
                 .json(&payload)
                 .send()
                 .await
@@ -146,6 +125,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             "Heartbeat sent: load={:.2}, connections={}, bytes={}, packets={}",
                             load, device_count, total_bytes, total_packets
                         );
+                    } else {
+                        log::warn!("Heartbeat rejected: HTTP {} — check RELAY_AUTH_TOKEN", resp.status());
                     }
                 }
                 Err(e) => log::error!("Heartbeat failed: {}", e),
@@ -153,10 +134,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
 
-    // Wait for either task to complete (runs indefinitely)
     tokio::select! {
         _ = relay_task => log::error!("Relay loop exited unexpectedly"),
-        _ = heartbeat_task => log::error!("Heartbeat loop exited unexpectedly"),
+        _ = heartbeat_task => log::error!("Relay loop exited unexpectedly"),
     }
 
     Ok(())

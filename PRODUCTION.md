@@ -45,6 +45,8 @@ openssl rand -base64 32  # 用作数据库密码
 cat > ../.env.prod << 'EOF'
 JWT_SECRET=<上面生成的hex密钥>
 POSTGRES_PASSWORD=<上面生成的base64密码>
+REDIS_PASSWORD=<生成的redis密码>
+RELAY_AUTH_TOKEN=<生成的relay认证token>
 DEBUG=false
 LOG_LEVEL=INFO
 EOF
@@ -120,6 +122,8 @@ docker network create --driver overlay mesh-net
 # 创建 secrets
 echo "<jwt-secret>" | docker secret create jwt_secret -
 echo "<db-password>" | docker secret create db_password -
+echo "<redis-password>" | docker secret create redis_password -
+echo "<relay-auth-token>" | docker secret create relay_auth_token -
 ```
 
 ### 2.3 部署服务栈
@@ -158,7 +162,9 @@ kubectl apply -f deployment/k8s/namespace.yaml
 kubectl create secret generic mesh-secrets \
   --namespace p2p-mesh \
   --from-literal=jwt-secret="$(openssl rand -hex 32)" \
-  --from-literal=db-password="$(openssl rand -base64 32)"
+  --from-literal=db-password="$(openssl rand -base64 32)" \
+  --from-literal=redis-password="$(openssl rand -base64 32)" \
+  --from-literal=relay-auth-token="$(openssl rand -hex 32)"
 
 # 2. 部署 PostgreSQL（建议用云厂商 RDS，这里以集群内部署为例）
 kubectl apply -f deployment/k8s/postgres-statefulset.yaml
@@ -234,13 +240,16 @@ docker push registry.cn-hangzhou.aliyuncs.com/yourname/p2p-mesh-api:v1.0.0
 | 检查项 | 说明 |
 |--------|------|
 | `JWT_SECRET` | 使用 `openssl rand -hex 32` 生成，绝对不用默认值 |
+| `RELAY_AUTH_TOKEN` | 使用 `openssl rand -hex 32` 生成，relay 节点认证凭据 |
+| `REDIS_PASSWORD` | 高强度随机密码，Redis 连接加密认证 |
 | 数据库密码 | 高强度随机密码，不同服务不同密码 |
 | HTTPS | 强制 TLS 1.2+，HSTS 头部 |
 | 防火墙 | 仅开放 80/443（API）和 51821/udp（Relay），其余关闭 |
 | 数据库 | 不暴露公网端口，仅内网访问 |
-| Redis | 设置密码，不暴露公网 |
-| 限流 | Nginx 层 + API 层双重限流 |
+| Redis | 设置密码，不暴露公网，healthcheck 不泄露密码 |
+| 限流 | Nginx 层 + API 层 Redis 双重限流 |
 | 日志 | 不记录密码、token 等敏感信息 |
+| Token 传输 | WebSocket JWT 通过 Authorization 头传输，不在 URL 中 |
 | 备份 | 数据库每日自动备份 |
 | 监控 | Prometheus + Grafana + 告警规则 |
 

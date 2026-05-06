@@ -39,10 +39,13 @@ async def find_path(
             detail="One or both devices not found",
         )
 
-    if dev_a.user_id != user.id and dev_b.user_id != user.id:
+    # Both devices must belong to the current user.
+    # Previously allowed "at least one" which leaked routing info about
+    # other users' devices (IP, region) when combined with path selection.
+    if dev_a.user_id != user.id or dev_b.user_id != user.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="At least one device must belong to you",
+            detail="Both devices must belong to you",
         )
 
     result = await choose_path(
@@ -56,7 +59,7 @@ async def find_path(
     return {
         "path_type": result.path_type,
         "relay_node_id": str(result.relay_node_id) if result.relay_node_id else None,
-        "relay_ip": result.relay_ip,
+        "relay_ip": result.relay_ip if user.role.value == "admin" else "***",
         "relay_port": result.relay_port,
         "reason": result.reason,
     }

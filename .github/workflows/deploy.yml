@@ -32,7 +32,7 @@ jobs:
         run: |
           cd control-plane
           pip install -r requirements.txt
-          pip install ruff mypy
+          pip install ruff mypy bandit pip-audit
 
       - name: Lint Python
         run: |
@@ -42,7 +42,17 @@ jobs:
       - name: Python type check
         run: |
           cd control-plane
-          mypy app/ --ignore-missing-imports || true
+          mypy app/ --ignore-missing-imports
+
+      - name: Python security scan (bandit)
+        run: |
+          cd control-plane
+          bandit -r app/ -ll
+
+      - name: Python dependency audit
+        run: |
+          cd control-plane
+          pip-audit || true  # Non-blocking: notify but don't fail build on dep advisories
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -50,12 +60,18 @@ jobs:
       - name: Lint Rust
         run: |
           cd data-plane
-          cargo clippy --all-targets -- -D warnings || true
+          cargo clippy --all-targets -- -D warnings
 
       - name: Test Rust
         run: |
           cd data-plane
           cargo test
+
+      - name: Rust dependency audit
+        run: |
+          cd data-plane
+          cargo install cargo-audit
+          cargo audit || true  # Non-blocking: notify but don't fail build
 
   # ---- 构建并推送镜像 ----
   build-and-push:

@@ -1,6 +1,11 @@
 """
 Signaling service - WebSocket-based real-time signaling for P2P connection establishment.
 Manages device presence, SDP/ICE relay, and connection state.
+
+Security:
+- Sender identity is verified on relay_signal (no device ID spoofing)
+- Peers list is restricted to same-user devices only (no topology leak)
+- Signaling messages are validated before forwarding
 """
 
 import asyncio
@@ -28,11 +33,13 @@ class SignalingHub:
 
     Responsibilities:
     - Track online devices and their WebSocket connections
-    - Relay SDP offers/answers between peers
-    - Relay ICE candidates
+    - Relay SDP offers/answers between peers (with sender verification)
+    - Relay ICE candidates (with sender verification)
     - Handle connection state notifications
-    - Broadcast device online/offline events
+    - Broadcast device online/offline events to same-user devices only
     """
+
+    MAX_CONNECTIONS = 10_000
 
     def __init__(self):
         # device_id -> DeviceConnection
@@ -44,8 +51,15 @@ class SignalingHub:
     async def connect(
         self, device_id: uuid.UUID, user_id: uuid.UUID, ws
     ):
-        """Register a new device WebSocket connection."""
+        """Register a new device WebSocket connection.
+        Raises RuntimeError if the hub is at capacity."""
         async with self._lock:
+            # Hard limit to prevent connection exhaustion DoS
+            if len(self._connections) >= self.MAX_CONNECTIONS:
+                raise RuntimeError(
+                    f"Signaling hub at capacity ({self.MAX_CONNECTIONS} connections)"
+                )
+
             connection = DeviceConnection(
                 device_id=device_id,
                 user_id=user_id,
@@ -62,7 +76,7 @@ class SignalingHub:
                 f"Total online: {len(self._connections)}"
             )
 
-        # Notify peers
+        # Notify other devices of the same user
         await self._notify_device_status(device_id, user_id, online=True)
 
     async def disconnect(self, device_id: uuid.UUID):
@@ -80,7 +94,7 @@ class SignalingHub:
                     f"Total online: {len(self._connections)}"
                 )
 
-                # Notify peers
+                # Notify same-user peers
                 await self._notify_device_status(
                     device_id, conn.user_id, online=False
                 )
@@ -93,14 +107,36 @@ class SignalingHub:
         payload: dict,
     ) -> bool:
         """
-        Relays a signaling message from one device to another.
-        Used for SDP exchange and ICE candidates during P2P setup.
+        Relay a signaling message from one device to another.
+
+        The from_device_id MUST match the authenticated sender — this is
+        enforced by the caller (ws.py) which already verified device ownership
+        via JWT + database lookup. We do NOT trust the from_device_id in the
+        message body; we use the authenticated sender's identity.
 
         Returns True if the target device received the message.
         """
+        # Verify sender is connected as the claimed device
+        sender = self._connections.get(from_device_id)
+        if sender is None:
+            logger.warning(
+                f"Sender {from_device_id} not connected — rejecting relay"
+            )
+            return False
+
         target = self._connections.get(to_device_id)
         if not target:
             logger.warning(f"Target device {to_device_id} not online")
+            return False
+
+        # Enforce that sender and target belong to the same user
+        # (In production, inter-user signaling may be allowed but requires
+        # explicit authorization — for now, only same-user devices can signal)
+        if sender.user_id != target.user_id:
+            logger.warning(
+                f"Cross-user signaling blocked: sender_user={sender.user_id} "
+                f"target_user={target.user_id}"
+            )
             return False
 
         message = {
@@ -134,18 +170,20 @@ class SignalingHub:
     async def get_online_peers(
         self, device_id: uuid.UUID
     ) -> list[dict]:
-        """Get a list of all other online devices."""
+        """
+        Get a list of other online devices belonging to the SAME user.
+        Only returns device_id — no user_id or IP leakage.
+        """
         conn = self._connections.get(device_id)
         if not conn:
             return []
 
         peers = []
-        for other_id, other_conn in self._connections.items():
-            if other_id != device_id:
+        same_user_devices = self._user_devices.get(conn.user_id, set())
+        for other_id in same_user_devices:
+            if other_id != device_id and other_id in self._connections:
                 peers.append({
                     "device_id": str(other_id),
-                    "user_id": str(other_conn.user_id),
-                    "online_since": other_conn.online_since,
                 })
         return peers
 
@@ -155,14 +193,13 @@ class SignalingHub:
         user_id: uuid.UUID,
         online: bool,
     ):
-        """Notify related peers about a device going online or offline."""
+        """Notify same-user peers about a device going online or offline."""
         message = {
             "type": "device_status",
             "device_id": str(device_id),
-            "user_id": str(user_id),
             "online": online,
         }
-        # Notify other devices of the same user
+        # Only notify devices of the same user
         await self.broadcast_to_user(user_id, message)
 
     @property

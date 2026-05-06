@@ -2,6 +2,7 @@
 # Multi-stage build for minimal image size
 
 # ---- Build Stage ----
+# Build stage uses latest stable Rust (pinned minor is fragile with fast-moving deps)
 FROM rust:latest AS builder
 
 WORKDIR /build
@@ -48,4 +49,7 @@ COPY --from=builder /build/target/release/mesh-relay /app/mesh-relay
 EXPOSE 51821/udp
 
 ENTRYPOINT ["/app/mesh-relay"]
-CMD ["--port", "51821"]
+# All arguments are read from environment variables:
+#   RELAY_ID, RELAY_AUTH_TOKEN, API_URL, REGION, RELAY_PORT,
+#   HEARTBEAT_INTERVAL, RELAY_MAX_CONNECTIONS, RELAY_BANDWIDTH_MBPS
+CMD []

@@ -1,29 +1,50 @@
 """
-Shared FastAPI dependencies: authentication, authorization, and common helpers.
+FastAPI dependencies: JWT auth, device ownership verification, role checks.
 """
 
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, status, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-import jwt
-from jwt.exceptions import InvalidTokenError
+from jose import jwt, JWTError
+
+import hmac
 
 from app.config import settings
 from app.database import get_db, get_redis
 
-security_scheme = HTTPBearer()
+security_scheme = HTTPBearer(auto_error=False)
+
+
+def _constant_time_compare(a: str, b: str) -> bool:
+    """Constant-time string comparison to prevent timing attacks.
+    Uses hmac.compare_digest which is immune to timing side-channels."""
+    return hmac.compare_digest(a.encode("utf-8"), b.encode("utf-8"))
 
 
 async def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(security_scheme),
+    request: Request,
+    credentials: HTTPAuthorizationCredentials | None = Depends(security_scheme),
     db=Depends(get_db),
+    redis_client=Depends(get_redis),
 ):
     """
-    Validate JWT token and return the current authenticated user.
-    Used as a dependency on protected endpoints.
+    Validate JWT access token. Checks:
+    1. Signature and expiry (via pyjwt)
+    2. Token type is 'access' (not a refresh token)
+    3. jti is not blacklisted (precise revocation)
+    4. User exists and is active
+
+    Returns the authenticated User or raises 401.
     """
+    if credentials is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authorization header required",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
     token = credentials.credentials
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -36,57 +57,106 @@ async def get_current_user(
             token,
             settings.JWT_SECRET,
             algorithms=[settings.JWT_ALGORITHM],
+            options={"require": ["exp", "jti", "sub", "type"]},
         )
-        user_id: str = payload.get("sub")
-        if user_id is None:
-            raise credentials_exception
-    except InvalidTokenError:
+    except JWTError:
         raise credentials_exception
 
-    # Check token in Redis blacklist (for logout)
-    redis = await get_redis()
-    is_blacklisted = await redis.exists(f"jwt_blacklist:{token}")
+    # Reject refresh tokens used as access tokens
+    if payload.get("type") != "access":
+        raise credentials_exception
+
+    user_id_str = payload.get("sub")
+    jti = payload.get("jti")
+    if not user_id_str or not jti:
+        raise credentials_exception
+
+    # Check blacklist by jti (precise revocation)
+    is_blacklisted = await redis_client.exists(f"jwt_blacklist:{jti}")
     if is_blacklisted:
         raise credentials_exception
 
-    # Fetch user from database
+    # Fetch user
     from sqlalchemy import select
     from app.models.user import User
 
-    result = await db.execute(
-        select(User).where(User.id == uuid.UUID(user_id))
-    )
+    try:
+        user_uuid = uuid.UUID(user_id_str)
+    except ValueError:
+        raise credentials_exception
+
+    result = await db.execute(select(User).where(User.id == user_uuid))
     user = result.scalar_one_or_none()
 
-    if user is None:
+    if user is None or not user.is_active:
         raise credentials_exception
 
     return user
 
 
-async def get_current_active_device(
+async def get_current_device(
+    device_id: str,
     user=Depends(get_current_user),
     db=Depends(get_db),
 ):
     """
-    Validate the user has at least one active device.
-    Returns the user.
+    Verify that the given device_id belongs to the authenticated user.
+    Used by WebSocket and device-specific endpoints to prevent
+    cross-user device impersonation.
     """
     from sqlalchemy import select
     from app.models.device import Device
 
+    try:
+        dev_uuid = uuid.UUID(device_id)
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid device_id")
+
     result = await db.execute(
-        select(Device).where(
-            Device.user_id == user.id,
-            Device.online == True,
-        ).limit(1)
+        select(Device).where(Device.id == dev_uuid, Device.user_id == user.id)
     )
     device = result.scalar_one_or_none()
 
     if device is None:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="No active device found. Please register a device first.",
+            detail="Device not found or does not belong to you",
         )
 
+    return device, user
+
+
+async def require_admin(user=Depends(get_current_user)):
+    """Require admin role."""
+    if user.role.value != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin access required",
+        )
     return user
+
+
+async def get_relay_auth(request: Request):
+    """
+    Authenticate relay nodes via a shared bearer token.
+    Relays are not user accounts — they use RELAY_AUTH_TOKEN for API access.
+    """
+    from app.config import settings
+
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Relay authentication required",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    token = auth_header[7:]  # strip "Bearer "
+    # Constant-time comparison to prevent timing side-channel attacks
+    if not _constant_time_compare(token, settings.RELAY_AUTH_TOKEN):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid relay credentials",
+        )
+
+    return token

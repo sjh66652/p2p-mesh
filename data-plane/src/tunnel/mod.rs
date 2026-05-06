@@ -130,17 +130,20 @@ impl TunnelManager {
 
 /// Perform UDP hole punching to establish a P2P connection.
 ///
-/// Sends a burst of packets to the peer to create a NAT binding,
-/// enabling direct communication even behind NAT.
+/// Sends a burst of randomized packets to the peer to create a NAT binding.
+/// Packet payloads are random to avoid traffic fingerprinting by DPI/middleboxes.
 pub async fn hole_punch(
     socket: &UdpSocket,
     peer_addr: SocketAddr,
     num_packets: usize,
 ) -> Result<(), std::io::Error> {
-    // Send multiple punch packets to establish NAT binding
-    let punch_data = b"P2P_MESH_PUNCH";
+    use rand::RngCore;
+    // Send multiple punch packets with random payloads to avoid fingerprinting
+    let mut rng = rand::thread_rng();
     for _ in 0..num_packets {
-        socket.send_to(punch_data, peer_addr).await?;
+        let mut punch_data = [0u8; 64];
+        rng.fill_bytes(&mut punch_data);
+        socket.send_to(&punch_data, peer_addr).await?;
         // Small delay between punches
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     }

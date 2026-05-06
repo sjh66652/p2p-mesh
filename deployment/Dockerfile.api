@@ -1,36 +1,44 @@
-# P2P Mesh Network - Control Plane API Dockerfile
+# P2P Mesh Network - Control Plane API Dockerfile (Security-Hardened)
 FROM python:3.11-slim
 
-# Set environment
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONUNBUFFERED=1
-ENV DEBIAN_FRONTEND=noninteractive
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    DEBIAN_FRONTEND=noninteractive \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl \
-    && rm -rf /var/lib/apt/lists/*
+# Install only what's needed, then clean
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl procps \
+    && rm -rf /var/lib/apt/lists/* /var/cache/apt/*
 
-# Create app user
-RUN useradd --create-home --shell /bin/bash mesh
+# Create non-root user early
+RUN groupadd -r mesh && useradd -r -g mesh -d /app -s /sbin/nologin mesh
 
 WORKDIR /app
 
-# Install Python dependencies
+# Copy deps first for layer caching
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application code
+# Install as root, then switch ownership
+RUN pip install --no-cache-dir -r requirements.txt \
+    && rm -rf /root/.cache/pip
+
+# Copy application
 COPY app/ ./app/
 
-# Switch to non-root user
+# Everything owned by mesh
 RUN chown -R mesh:mesh /app
-USER mesh
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
-    CMD curl -f http://localhost:8000/health || exit 1
+# Drop privileges
+USER mesh
 
 EXPOSE 8000
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]
+# Health check via Python (no curl needed at runtime)
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 --start-period=10s \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"
+
+# Production: use gunicorn + uvicorn workers for better process management
+# During debugging, single worker without --no-access-log surfaces startup errors
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]

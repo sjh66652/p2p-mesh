@@ -7,7 +7,15 @@ from alembic import context
 from app.database import Base
 from app.models import *  # noqa: F401,F403 - Import all models for autogenerate
 
+import os
+
 config = context.config
+
+# Override hardcoded URL with environment variable (production-safe)
+db_url = os.getenv("DATABASE_URL_SYNC")
+if db_url:
+    config.set_main_option("sqlalchemy.url", db_url)
+
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 

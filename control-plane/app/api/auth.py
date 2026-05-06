@@ -1,6 +1,6 @@
-"""Authentication API routes - login, register, profile management."""
+"""Authentication API routes - login, register, token refresh."""
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Body
 from fastapi.security import HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -22,17 +22,46 @@ async def register(data: UserRegister, db: AsyncSession = Depends(get_db)):
         user = await auth_service.register_user(db, data)
         return user
     except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
+        # Use generic error to prevent user enumeration
+        # (avoids leaking whether email exists vs. password too weak)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Registration failed. Check your input and try again.",
+        )
 
 
-@router.post("/login", response_model=TokenResponse)
-async def login(data: UserLogin, db: AsyncSession = Depends(get_db)):
-    """Authenticate and receive a JWT access token."""
+@router.post("/login")
+async def login(
+    data: UserLogin,
+    db: AsyncSession = Depends(get_db),
+    redis_client=Depends(get_redis),
+):
+    """Authenticate and receive JWT tokens (access + refresh)."""
     try:
-        token_data = await auth_service.login_user(db, data)
+        token_data = await auth_service.login_user(db, data, redis_client)
         return token_data
     except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(e))
+        # Generic error — don't reveal whether email exists
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid credentials",
+        )
+
+
+@router.post("/refresh")
+async def refresh_token(
+    refresh_token: str = Body(..., embed=True),
+    redis_client=Depends(get_redis),
+):
+    """Get a new access token using a refresh token."""
+    try:
+        token_data = await auth_service.refresh_access_token(refresh_token, redis_client)
+        return token_data
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired refresh token",
+        )
 
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
@@ -40,7 +69,7 @@ async def logout(
     credentials: HTTPAuthorizationCredentials = Depends(security_scheme),
     redis_client=Depends(get_redis),
 ):
-    """Invalidate the current JWT token."""
+    """Invalidate current tokens (access + refresh)."""
     await auth_service.logout_user(redis_client, credentials.credentials)
 
 
@@ -56,7 +85,7 @@ async def update_profile(
     user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Update the current user's profile."""
+    """Update user profile. Only whitelisted fields can be modified."""
     try:
         updated = await auth_service.update_user(
             db, user, data.model_dump(exclude_unset=True)
@@ -72,10 +101,8 @@ async def change_password(
     user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Change the current user's password."""
+    """Change password (requires current password)."""
     try:
-        await auth_service.change_password(
-            db, user, data.old_password, data.new_password
-        )
+        await auth_service.change_password(db, user, data.old_password, data.new_password)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))

@@ -98,6 +98,62 @@ async def update_heartbeat(
     return relay
 
 
+async def heartbeat_by_name(
+    db: AsyncSession,
+    name: str,
+    ip: str,
+    port: int,
+    region: str,
+    load: float,
+    current_connections: int,
+    bandwidth_used_mbps: float,
+    max_capacity: int = 1000,
+    bandwidth_capacity_mbps: float = 1000.0,
+) -> RelayNode:
+    """
+    Update relay status via heartbeat, identified by name.
+    Auto-registers the relay if it doesn't exist yet.
+    This allows relay nodes to self-identify without admin pre-registration.
+    """
+    # Look up by name first
+    result = await db.execute(
+        select(RelayNode).where(RelayNode.name == name)
+    )
+    relay = result.scalar_one_or_none()
+
+    if relay is None:
+        # Auto-register: relay node has valid RELAY_AUTH_TOKEN, so it's trusted
+        relay = RelayNode(
+            name=name,
+            ip=ip,
+            port=port,
+            region=region,
+            max_capacity=max_capacity,
+            bandwidth_capacity_mbps=bandwidth_capacity_mbps,
+            status=RelayStatus.ONLINE,
+        )
+        db.add(relay)
+        await db.flush()
+        import logging
+        logging.getLogger(__name__).info(
+            "Auto-registered relay: name=%s ip=%s region=%s", name, ip, region
+        )
+
+    relay.load = load
+    relay.current_connections = current_connections
+    relay.bandwidth_used_mbps = bandwidth_used_mbps
+    relay.last_heartbeat = datetime.now(timezone.utc)
+
+    if load > settings.RELAY_MAX_LOAD:
+        relay.status = RelayStatus.OVERLOADED
+    else:
+        relay.status = RelayStatus.ONLINE
+
+    await db.flush()
+    await db.refresh(relay)
+    return relay
+
+
 async def set_relay_status(
     db: AsyncSession, relay_id: uuid.UUID, status: str
 ) -> RelayNode:

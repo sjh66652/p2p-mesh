@@ -1,8 +1,9 @@
 # P2P Mesh Network - Docker Compose (Development / Small Production)
 # Full stack: API + PostgreSQL + Redis + Nginx + Relay Node
 # For large-scale production, use Kubernetes manifests in ./k8s/
-
-version: "3.8"
+#
+# Security: All secrets come from .env file. An .env.example is provided.
+# Copy .env.example to .env and change values before first launch.
 
 services:
   # ============================================================
@@ -29,13 +30,18 @@ services:
     build:
       context: ../control-plane
       dockerfile: ../deployment/Dockerfile.api
+    init: true
+    # Bind only to localhost — Nginx is the only public entry point.
+    # Prevents direct external access to the API bypassing rate limits,
+    # trusted-host checks, and request-size limits configured in Nginx.
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     environment:
-      - DATABASE_URL=postgresql+asyncpg://mesh:mesh_pass@postgres:5432/p2p_mesh
-      - DATABASE_URL_SYNC=postgresql://mesh:mesh_pass@postgres:5432/p2p_mesh
-      - REDIS_URL=redis://redis:6379/0
-      - JWT_SECRET=${JWT_SECRET:-change-this-in-production}
+      - DATABASE_URL=postgresql+asyncpg://mesh:${POSTGRES_PASSWORD}@postgres:5432/p2p_mesh
+      - DATABASE_URL_SYNC=postgresql://mesh:${POSTGRES_PASSWORD}@postgres:5432/p2p_mesh
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
+      - JWT_SECRET=${JWT_SECRET}
+      - RELAY_AUTH_TOKEN=${RELAY_AUTH_TOKEN}
       - DEBUG=${DEBUG:-false}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
     depends_on:
@@ -49,8 +55,9 @@ services:
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 15s
-      timeout: 5s
-      retries: 3
+      timeout: 10s
+      retries: 10
+      start_period: 90s
 
   # ============================================================
   # Worker — Background tasks (traffic aggregation, cleanup)
@@ -59,18 +66,19 @@ services:
     build:
       context: ../control-plane
       dockerfile: ../deployment/Dockerfile.api
-    command: >
-      python -c "
-      import asyncio;
-      from app.services.relay_service import start_relay_health_check;
-      async def main():
-          task = start_relay_health_check();
-          await task
-      asyncio.run(main())
-      "
+    init: true
+    command: python -m app.worker
+    # Worker has no HTTP server — override the API's HTTP healthcheck
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f 'app.worker' || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 15s
     environment:
-      - DATABASE_URL=postgresql+asyncpg://mesh:mesh_pass@postgres:5432/p2p_mesh
-      - REDIS_URL=redis://redis:6379/0
+      - DATABASE_URL=postgresql+asyncpg://mesh:${POSTGRES_PASSWORD}@postgres:5432/p2p_mesh
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
     depends_on:
       postgres:
         condition: service_healthy
@@ -87,10 +95,11 @@ services:
     image: postgres:16-alpine
     environment:
       POSTGRES_USER: mesh
-      POSTGRES_PASSWORD: mesh_pass
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: p2p_mesh
+    # Only expose to localhost for development debugging
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
@@ -109,15 +118,24 @@ services:
   redis:
     image: redis:7-alpine
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     volumes:
       - redis_data:/data
-    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    command: >
+      redis-server
+      --appendonly yes
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+      --requirepass ${REDIS_PASSWORD}
+    # Use REDISCLI_AUTH env var instead of -a flag to avoid password
+    # appearing in process listing (/proc/*/cmdline)
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "redis-cli --no-auth-warning ping"]
       interval: 10s
       timeout: 5s
       retries: 5
+    environment:
+      REDISCLI_AUTH: ${REDIS_PASSWORD}
     restart: unless-stopped
     networks:
       - mesh-net
@@ -133,8 +151,10 @@ services:
       - "51821:51821/udp"
     environment:
       - API_URL=http://api:8000
-      - RELAY_ID=relay-primary
+      - RELAY_AUTH_TOKEN=${RELAY_AUTH_TOKEN}
+      - RELAY_ID=${RELAY_ID:-relay-primary}
       - REGION=default
+      - RELAY_PORT=51821
       - HEARTBEAT_INTERVAL=30
     depends_on:
       - api
@@ -143,12 +163,12 @@ services:
       - mesh-net
 
   # ============================================================
-  # Prometheus — Metrics collection
+  # Prometheus — Metrics collection (dev only: localhost access)
   # ============================================================
   prometheus:
     image: prom/prometheus:latest
     ports:
-      - "9090:9090"
+      - "127.0.0.1:9090:9090"
     volumes:
       - ../monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus_data:/prometheus
@@ -166,10 +186,10 @@ services:
   grafana:
     image: grafana/grafana:latest
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     environment:
       - GF_SECURITY_ADMIN_USER=${GRAFANA_USER:-admin}
-      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD}
       - GF_AUTH_ANONYMOUS_ENABLED=false
     volumes:
       - grafana_data:/var/lib/grafana

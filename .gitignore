@@ -9,7 +9,7 @@ venv/
 
 # Rust
 target/
-Cargo.lock
+# Cargo.lock is COMMITTED for reproducible builds and supply-chain auditability
 
 # Environment
 .env

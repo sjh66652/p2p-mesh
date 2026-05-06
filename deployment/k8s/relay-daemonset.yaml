@@ -45,6 +45,11 @@ spec:
           env:
             - name: API_URL
               value: "http://mesh-api.p2p-mesh.svc.cluster.local:8000"
+            - name: RELAY_AUTH_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: mesh-secrets
+                  key: relay-auth-token
             - name: REGION
               valueFrom:
                 fieldRef:
@@ -58,12 +63,23 @@ spec:
             limits:
               cpu: "1000m"
               memory: "512Mi"
+          # Security: Relay needs raw socket access for UDP forwarding.
+          # hostNetwork=true is required for low-latency relay but increases
+          # attack surface. Mitigations: non-root user, drop all caps, read-only root FS,
+          # and never run untrusted workloads on relay nodes.
           securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
             capabilities:
-              add:
-                - NET_ADMIN
-                - NET_RAW
-            privileged: false
+              drop:
+                - ALL
+          # NOTE: if NET_RAW or NET_ADMIN are actually required by your kernel
+          # for UDP socket operations, add them back individually:
+          # capabilities:
+          #   add:
+          #     - NET_RAW
           volumeMounts:
             - name: relay-cache
               mountPath: /var/cache/mesh-relay

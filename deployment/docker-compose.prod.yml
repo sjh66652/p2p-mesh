@@ -38,12 +38,17 @@ services:
   # ---- Control Plane API ----
   api:
     image: ${DOCKER_REGISTRY:-yourorg}/p2p-mesh-api:${IMAGE_TAG:-latest}
+    init: true
+    # Bind only to localhost — Nginx is the sole public entry point.
+    # Prevents direct API access bypassing Nginx rate limiting, TLS, and filtering.
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     environment:
       - DATABASE_URL=postgresql+asyncpg://mesh:${POSTGRES_PASSWORD}@postgres:5432/p2p_mesh
+      - DATABASE_URL_SYNC=postgresql://mesh:${POSTGRES_PASSWORD}@postgres:5432/p2p_mesh
       - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
       - JWT_SECRET=${JWT_SECRET}
+      - RELAY_AUTH_TOKEN=${RELAY_AUTH_TOKEN}
       - DEBUG=false
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - LOG_FORMAT=json
@@ -60,9 +65,9 @@ services:
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 15s
-      timeout: 5s
-      retries: 3
-      start_period: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 90s
     deploy:
       resources:
         limits:
@@ -80,12 +85,15 @@ services:
   # ---- Background Worker ----
   worker:
     image: ${DOCKER_REGISTRY:-yourorg}/p2p-mesh-api:${IMAGE_TAG:-latest}
-    command: >
-      python -c "
-      import asyncio;
-      from app.services.relay_service import start_relay_health_check;
-      asyncio.run(start_relay_health_check())
-      "
+    init: true
+    command: python -m app.worker
+    # Worker has no HTTP server — process-alive healthcheck
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f 'app.worker' || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 15s
     environment:
       - DATABASE_URL=postgresql+asyncpg://mesh:${POSTGRES_PASSWORD}@postgres:5432/p2p_mesh
       - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
@@ -155,10 +163,14 @@ services:
       --maxmemory-policy allkeys-lru
       --requirepass ${REDIS_PASSWORD}
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      # Use REDISCLI_AUTH env var instead of -a flag to avoid password
+      # appearing in process listing (/proc/*/cmdline)
+      test: ["CMD-SHELL", "redis-cli --no-auth-warning ping"]
       interval: 10s
       timeout: 5s
       retries: 5
+    environment:
+      REDISCLI_AUTH: ${REDIS_PASSWORD}
     restart: unless-stopped
     networks:
       - mesh-net
@@ -175,8 +187,10 @@ services:
       - "51821:51821/udp"
     environment:
       - API_URL=http://api:8000
+      - RELAY_AUTH_TOKEN=${RELAY_AUTH_TOKEN}
       - RELAY_ID=${RELAY_ID:-relay-primary}
       - REGION=${RELAY_REGION:-default}
+      - RELAY_PORT=51821
       - HEARTBEAT_INTERVAL=30
     depends_on:
       - api

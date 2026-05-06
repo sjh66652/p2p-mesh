@@ -31,13 +31,16 @@ log = "0.4"
 env_logger = "0.11"
 
 # CLI argument parsing
-clap = { version = "4", features = ["derive"] }
+clap = { version = "4", features = ["derive", "env"] }
 
 # Base64 encoding for keys
 base64 = "0.22"
 
 # SHA-256 for hashing
 sha2 = "0.10"
+
+# HMAC for relay packet authentication
+hmac = "0.12"
 
 # Zeroing memory for security
 zeroize = { version = "1", features = ["derive"] }

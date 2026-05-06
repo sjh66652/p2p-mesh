@@ -1,22 +1,21 @@
 # P2P Mesh Network - Control Plane API Deployment
 # Production Kubernetes manifest
+#
+# SECURITY: Secrets must be created separately via:
+#   kubectl create secret generic mesh-secrets \
+#     --namespace=p2p-mesh \
+#     --from-literal=jwt-secret=$(openssl rand -hex 32) \
+#     --from-literal=db-password=<secure-password> \
+#     --from-literal=redis-password=<secure-password> \
+#     --from-literal=relay-auth-token=$(openssl rand -hex 32)
+#
+# Never commit real secrets to this file.
+# Use a secret management solution (Sealed Secrets, Vault, etc.) in production.
 
 apiVersion: v1
 kind: Namespace
 metadata:
   name: p2p-mesh
-
----
-apiVersion: v1
-kind: Secret
-metadata:
-  name: mesh-secrets
-  namespace: p2p-mesh
-type: Opaque
-stringData:
-  jwt-secret: "change-this-to-a-secure-random-value"
-  db-password: "mesh-prod-password"
-  redis-password: ""
 
 ---
 apiVersion: v1
@@ -34,6 +33,13 @@ data:
   relay-cleanup-interval: "300"
   relay-max-load: "0.8"
   free-plan-bandwidth-mbps: "1"
+  # Full DATABASE_URL is constructed from individual secret parts at startup
+  db-host: "postgres-cluster"
+  db-port: "5432"
+  db-name: "p2p_mesh"
+  db-user: "mesh"
+  redis-host: "redis-cluster"
+  redis-port: "6379"
 
 ---
 apiVersion: apps/v1
@@ -78,19 +84,63 @@ spec:
               name: http
               protocol: TCP
           env:
-            - name: DATABASE_URL
+            # Construct DATABASE_URL from ConfigMap + Secret parts
+            - name: DB_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: mesh-config
+                  key: db-host
+            - name: DB_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: mesh-config
+                  key: db-port
+            - name: DB_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: mesh-config
+                  key: db-name
+            - name: DB_USER
+              valueFrom:
+                configMapKeyRef:
+                  name: mesh-config
+                  key: db-user
+            - name: DB_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: mesh-secrets
                   key: db-password
-            # Simplified — production uses Cloud SQL proxy or similar
+            - name: REDIS_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: mesh-config
+                  key: redis-host
+            - name: REDIS_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: mesh-config
+                  key: redis-port
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mesh-secrets
+                  key: redis-password
+            - name: DATABASE_URL
+              value: "postgresql+asyncpg://$(DB_USER):$(DB_PASSWORD)@$(DB_HOST):$(DB_PORT)/$(DB_NAME)"
+            - name: DATABASE_URL_SYNC
+              value: "postgresql://$(DB_USER):$(DB_PASSWORD)@$(DB_HOST):$(DB_PORT)/$(DB_NAME)"
+            - name: REDIS_URL
+              value: "redis://:$(REDIS_PASSWORD)@$(REDIS_HOST):$(REDIS_PORT)/0"
             - name: JWT_SECRET
               valueFrom:
                 secretKeyRef:
                   name: mesh-secrets
                   key: jwt-secret
-            - name: REDIS_URL
-              value: "redis://redis-cluster:6379/0"
+            - name: RELAY_AUTH_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: mesh-secrets
+                  key: relay-auth-token
           envFrom:
             - configMapRef:
                 name: mesh-config

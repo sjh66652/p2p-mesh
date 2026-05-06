@@ -35,8 +35,9 @@ class UserResponse(BaseModel):
 
 
 class UserUpdate(BaseModel):
+    """Only non-privileged fields can be updated by the user.
+    Plan and role changes require admin intervention."""
     name: str | None = Field(None, max_length=128)
-    plan: str | None = None
 
 
 class PasswordChange(BaseModel):

@@ -5,6 +5,9 @@
 //! 2. Establishes P2P tunnels via NAT hole punching
 //! 3. Manages encrypted data channels
 //! 4. Reports traffic statistics
+//!
+//! Security: JWT token is read from MESH_TOKEN env var (never CLI args)
+//! and sent in the Authorization header, NOT the URL query string.
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -22,7 +25,9 @@ struct Args {
     #[arg(long, default_value = "http://localhost:8000")]
     api_url: String,
 
-    #[arg(long, env = "MESH_TOKEN")]
+    /// Token is read from MESH_TOKEN env var, NOT passed on command line.
+    /// Passing tokens via CLI args exposes them in /proc/*/cmdline.
+    #[arg(long, env = "MESH_TOKEN", hide_env_values = true)]
     token: String,
 
     #[arg(long, default_value = "51820")]
@@ -49,11 +54,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let tunnel_manager = Arc::new(Mutex::new(TunnelManager::new(socket.clone())));
 
+    // SECURITY: Token is NOT in the URL query string — that would leak
+    // into Nginx access logs, proxy logs, and process listings.
+    // Instead, the WebSocket client sets the Authorization header.
     let ws_connect_url = format!(
-        "{}/{}?token={}",
-        args.ws_url, args.device_id, args.token
+        "{}/{}",
+        args.ws_url, args.device_id
     );
-    log::info!("Connecting to signaling server: {}", ws_connect_url);
+    log::info!("Connecting to signaling server: {} (auth via Authorization header)", ws_connect_url);
 
     let mut buf = vec![0u8; 65536];
     let mut traffic_batch: Vec<u64> = Vec::new();
