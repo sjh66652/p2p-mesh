@@ -1,0 +1,122 @@
+{
+  "dashboard": {
+    "uid": "p2p-mesh-overview",
+    "title": "P2P Mesh Network - Overview",
+    "tags": ["p2p", "mesh", "networking"],
+    "timezone": "browser",
+    "schemaVersion": 38,
+    "version": 1,
+    "refresh": "10s",
+    "panels": [
+      {
+        "id": 1,
+        "title": "Online Devices",
+        "type": "stat",
+        "gridPos": {"x": 0, "y": 0, "w": 6, "h": 4},
+        "targets": [
+          {
+            "expr": "p2p_mesh_devices_online",
+            "legendFormat": "Online"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "thresholds": {
+              "steps": [
+                {"value": 0, "color": "red"},
+                {"value": 10, "color": "orange"},
+                {"value": 100, "color": "green"}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 2,
+        "title": "P2P Success Rate",
+        "type": "gauge",
+        "gridPos": {"x": 6, "y": 0, "w": 6, "h": 4},
+        "targets": [
+          {
+            "expr": "p2p_mesh_p2p_success_rate * 100",
+            "legendFormat": "Success Rate"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percent",
+            "thresholds": {
+              "steps": [
+                {"value": 0, "color": "red"},
+                {"value": 60, "color": "orange"},
+                {"value": 85, "color": "green"}
+              ]
+            },
+            "max": 100,
+            "min": 0
+          }
+        }
+      },
+      {
+        "id": 3,
+        "title": "Bandwidth Usage (Mbps)",
+        "type": "timeseries",
+        "gridPos": {"x": 0, "y": 4, "w": 12, "h": 8},
+        "targets": [
+          {
+            "expr": "rate(p2p_mesh_traffic_bytes_total[5m]) * 8 / 1000000",
+            "legendFormat": "{{connection_type}}"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "Mbps"
+          }
+        }
+      },
+      {
+        "id": 4,
+        "title": "Relay Node Load",
+        "type": "timeseries",
+        "gridPos": {"x": 0, "y": 12, "w": 12, "h": 8},
+        "targets": [
+          {
+            "expr": "p2p_mesh_relay_load",
+            "legendFormat": "{{relay_id}} ({{region}})"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percentunit",
+            "max": 1,
+            "min": 0
+          }
+        }
+      },
+      {
+        "id": 5,
+        "title": "Active Connections by Type",
+        "type": "piechart",
+        "gridPos": {"x": 0, "y": 20, "w": 6, "h": 6},
+        "targets": [
+          {
+            "expr": "p2p_mesh_connections_total",
+            "legendFormat": "{{type}}"
+          }
+        ]
+      },
+      {
+        "id": 6,
+        "title": "API Request Rate",
+        "type": "timeseries",
+        "gridPos": {"x": 6, "y": 20, "w": 6, "h": 6},
+        "targets": [
+          {
+            "expr": "rate(p2p_mesh_http_requests_total[1m])",
+            "legendFormat": "{{method}} {{endpoint}}"
+          }
+        ]
+      }
+    ]
+  }
+}

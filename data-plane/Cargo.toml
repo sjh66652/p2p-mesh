@@ -1,0 +1,46 @@
+[package]
+name = "p2p-mesh-dataplane"
+version = "1.0.0"
+edition = "2021"
+description = "High-performance P2P mesh networking data plane"
+
+[dependencies]
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# UDP socket operations
+socket2 = "0.5"
+
+# Cryptography: ChaCha20-Poly1305 (AEAD)
+chacha20poly1305 = "0.10"
+chacha20 = "0.9"
+
+# Random number generation
+rand = "0.8"
+
+# Serialization for wire protocol
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+bincode = "1"
+
+# HTTP client for control plane communication
+reqwest = { version = "0.12", features = ["json"] }
+
+# Logging
+log = "0.4"
+env_logger = "0.11"
+
+# CLI argument parsing
+clap = { version = "4", features = ["derive"] }
+
+# Base64 encoding for keys
+base64 = "0.22"
+
+# SHA-256 for hashing
+sha2 = "0.10"
+
+# Zeroing memory for security
+zeroize = { version = "1", features = ["derive"] }
+
+# Time utilities
+chrono = "0.4"

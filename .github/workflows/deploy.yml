@@ -1,0 +1,122 @@
+# P2P Mesh Network - CI/CD Pipeline
+# 推送 tag 时自动构建镜像并部署到服务器
+
+name: Build and Deploy
+
+on:
+  push:
+    tags:
+      - 'v*'           # v1.0.0 触发生产部署
+    branches:
+      - main           # main 分支触发测试环境
+  workflow_dispatch:    # 手动触发
+
+env:
+  DOCKER_REGISTRY: docker.io
+  IMAGE_NAME_API: yourorg/p2p-mesh-api
+  IMAGE_NAME_RELAY: yourorg/p2p-mesh-relay
+
+jobs:
+  # ---- 代码质量检查 ----
+  lint-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Python dependencies
+        run: |
+          cd control-plane
+          pip install -r requirements.txt
+          pip install ruff mypy
+
+      - name: Lint Python
+        run: |
+          cd control-plane
+          ruff check app/
+
+      - name: Python type check
+        run: |
+          cd control-plane
+          mypy app/ --ignore-missing-imports || true
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Lint Rust
+        run: |
+          cd data-plane
+          cargo clippy --all-targets -- -D warnings || true
+
+      - name: Test Rust
+        run: |
+          cd data-plane
+          cargo test
+
+  # ---- 构建并推送镜像 ----
+  build-and-push:
+    needs: lint-and-test
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Extract version tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Build & Push API image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./control-plane
+          file: ./deployment/Dockerfile.api
+          push: true
+          tags: |
+            ${{ env.IMAGE_NAME_API }}:latest
+            ${{ env.IMAGE_NAME_API }}:${{ steps.version.outputs.VERSION }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build & Push Relay image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./data-plane
+          file: ./deployment/Dockerfile.relay
+          push: true
+          tags: |
+            ${{ env.IMAGE_NAME_RELAY }}:latest
+            ${{ env.IMAGE_NAME_RELAY }}:${{ steps.version.outputs.VERSION }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ---- 部署到服务器 ----
+  deploy:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script: |
+            cd /opt/p2p-mesh/deployment
+            docker compose -f docker-compose.prod.yml pull
+            docker compose -f docker-compose.prod.yml up -d --remove-orphans
+            docker image prune -af

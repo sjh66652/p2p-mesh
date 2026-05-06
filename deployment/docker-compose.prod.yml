@@ -1,0 +1,246 @@
+# P2P Mesh Network - Production Docker Compose
+# 用于单机生产部署。多机部署用 Docker Swarm 或 Kubernetes。
+#
+# 与开发版的区别：
+#   - 镜像从仓库拉取，非本地构建
+#   - Nginx 启用 SSL
+#   - 数据库密码通过环境变量传入
+#   - 资源限制更严格
+#   - 日志驱动 json-file + 轮转
+#
+# 启动：
+#   docker compose -f docker-compose.prod.yml --env-file ../.env.prod up -d
+
+version: "3.8"
+
+services:
+  # ---- API Gateway (Nginx + SSL) ----
+  nginx:
+    image: nginx:1.25-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.prod.conf:/etc/nginx/nginx.conf:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+      - ./nginx/dhparam.pem:/etc/nginx/dhparam.pem:ro
+    depends_on:
+      - api
+    restart: unless-stopped
+    networks:
+      - mesh-net
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "3"
+
+  # ---- Control Plane API ----
+  api:
+    image: ${DOCKER_REGISTRY:-yourorg}/p2p-mesh-api:${IMAGE_TAG:-latest}
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://mesh:${POSTGRES_PASSWORD}@postgres:5432/p2p_mesh
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
+      - JWT_SECRET=${JWT_SECRET}
+      - DEBUG=false
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - LOG_FORMAT=json
+      - PROMETHEUS_ENABLED=true
+      - RATE_LIMIT_PER_MINUTE=${RATE_LIMIT:-120}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - mesh-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "3"
+
+  # ---- Background Worker ----
+  worker:
+    image: ${DOCKER_REGISTRY:-yourorg}/p2p-mesh-api:${IMAGE_TAG:-latest}
+    command: >
+      python -c "
+      import asyncio;
+      from app.services.relay_service import start_relay_health_check;
+      asyncio.run(start_relay_health_check())
+      "
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://mesh:${POSTGRES_PASSWORD}@postgres:5432/p2p_mesh
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - mesh-net
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "2"
+
+  # ---- PostgreSQL ----
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: mesh
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: p2p_mesh
+    # 生产环境不暴露端口到宿主机
+    # ports:
+    #   - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mesh -d p2p_mesh"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - mesh-net
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "3"
+    # 生产环境建议用云厂商 RDS 替代容器化 PostgreSQL
+
+  # ---- Redis ----
+  redis:
+    image: redis:7-alpine
+    # 生产环境不暴露端口
+    volumes:
+      - redis_data:/data
+    command: >
+      redis-server
+      --appendonly yes
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+      --requirepass ${REDIS_PASSWORD}
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - mesh-net
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "2"
+
+  # ---- Relay Node ----
+  relay:
+    image: ${DOCKER_REGISTRY:-yourorg}/p2p-mesh-relay:${IMAGE_TAG:-latest}
+    ports:
+      - "51821:51821/udp"
+    environment:
+      - API_URL=http://api:8000
+      - RELAY_ID=${RELAY_ID:-relay-primary}
+      - REGION=${RELAY_REGION:-default}
+      - HEARTBEAT_INTERVAL=30
+    depends_on:
+      - api
+    restart: unless-stopped
+    networks:
+      - mesh-net
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "3"
+
+  # ---- Prometheus ----
+  prometheus:
+    image: prom/prometheus:latest
+    volumes:
+      - ../monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=30d'
+    restart: unless-stopped
+    networks:
+      - mesh-net
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "3"
+
+  # ---- Grafana ----
+  grafana:
+    image: grafana/grafana:latest
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD}
+      - GF_AUTH_ANONYMOUS_ENABLED=false
+      - GF_SERVER_ROOT_URL=https://monitor.yourdomain.com
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ../monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+    networks:
+      - mesh-net
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "2"
+
+volumes:
+  postgres_data:
+  redis_data:
+  prometheus_data:
+  grafana_data:
+
+networks:
+  mesh-net:
+    driver: bridge

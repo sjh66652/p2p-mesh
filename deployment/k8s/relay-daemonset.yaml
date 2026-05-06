@@ -1,0 +1,90 @@
+# P2P Mesh Network - Relay Node DaemonSet
+# Runs one relay pod per node in the cluster for low-latency forwarding.
+# Uses hostNetwork for direct UDP performance.
+
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: mesh-relay
+  namespace: p2p-mesh
+  labels:
+    app: mesh-relay
+    component: data-plane
+spec:
+  selector:
+    matchLabels:
+      app: mesh-relay
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+  template:
+    metadata:
+      labels:
+        app: mesh-relay
+        component: data-plane
+    spec:
+      hostNetwork: true  # Direct host networking for UDP performance
+      dnsPolicy: ClusterFirstWithHostNet
+      nodeSelector:
+        mesh-relay: enabled
+      tolerations:
+        - key: "mesh-relay"
+          operator: "Equal"
+          value: "enabled"
+          effect: "NoSchedule"
+      containers:
+        - name: relay
+          image: p2p-mesh-relay:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 51821
+              hostPort: 51821
+              protocol: UDP
+              name: relay-udp
+          env:
+            - name: API_URL
+              value: "http://mesh-api.p2p-mesh.svc.cluster.local:8000"
+            - name: REGION
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: HEARTBEAT_INTERVAL
+              value: "30"
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "1000m"
+              memory: "512Mi"
+          securityContext:
+            capabilities:
+              add:
+                - NET_ADMIN
+                - NET_RAW
+            privileged: false
+          volumeMounts:
+            - name: relay-cache
+              mountPath: /var/cache/mesh-relay
+      terminationGracePeriodSeconds: 10
+      volumes:
+        - name: relay-cache
+          emptyDir: {}
+
+---
+# Service to expose relay metrics (not relay traffic — that's direct UDP)
+apiVersion: v1
+kind: Service
+metadata:
+  name: mesh-relay
+  namespace: p2p-mesh
+spec:
+  clusterIP: None  # Headless service
+  selector:
+    app: mesh-relay
+  ports:
+    - port: 51821
+      targetPort: 51821
+      protocol: UDP
+      name: relay

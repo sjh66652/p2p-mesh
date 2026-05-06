@@ -1,0 +1,166 @@
+# P2P Mesh Network - Control Plane API Deployment
+# Production Kubernetes manifest
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: p2p-mesh
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: mesh-secrets
+  namespace: p2p-mesh
+type: Opaque
+stringData:
+  jwt-secret: "change-this-to-a-secure-random-value"
+  db-password: "mesh-prod-password"
+  redis-password: ""
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mesh-config
+  namespace: p2p-mesh
+data:
+  host: "0.0.0.0"
+  port: "8000"
+  debug: "false"
+  log-level: "INFO"
+  stun-servers: "stun.l.google.com:19302,stun1.l.google.com:19302"
+  rate-limit-per-minute: "120"
+  relay-cleanup-interval: "300"
+  relay-max-load: "0.8"
+  free-plan-bandwidth-mbps: "1"
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mesh-api
+  namespace: p2p-mesh
+  labels:
+    app: mesh-api
+    component: control-plane
+spec:
+  replicas: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: mesh-api
+  template:
+    metadata:
+      labels:
+        app: mesh-api
+        component: control-plane
+    spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app: mesh-api
+                topologyKey: kubernetes.io/hostname
+      containers:
+        - name: api
+          image: p2p-mesh-api:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8000
+              name: http
+              protocol: TCP
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: mesh-secrets
+                  key: db-password
+            # Simplified — production uses Cloud SQL proxy or similar
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: mesh-secrets
+                  key: jwt-secret
+            - name: REDIS_URL
+              value: "redis://redis-cluster:6379/0"
+          envFrom:
+            - configMapRef:
+                name: mesh-config
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "512Mi"
+            limits:
+              cpu: "2000m"
+              memory: "2Gi"
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+      terminationGracePeriodSeconds: 30
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mesh-api
+  namespace: p2p-mesh
+spec:
+  type: ClusterIP
+  selector:
+    app: mesh-api
+  ports:
+    - port: 8000
+      targetPort: 8000
+      protocol: TCP
+      name: http
+
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: mesh-api-hpa
+  namespace: p2p-mesh
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: mesh-api
+  minReplicas: 3
+  maxReplicas: 20
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80

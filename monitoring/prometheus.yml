@@ -1,0 +1,46 @@
+# P2P Mesh Network - Prometheus Configuration
+# Scrapes metrics from the control plane API and export targets.
+
+global:
+  scrape_interval: 15s
+  scrape_timeout: 10s
+  evaluation_interval: 15s
+
+  external_labels:
+    cluster: p2p-mesh
+    environment: production
+
+# Alerting rules
+rule_files:
+  - "alerts/*.yml"
+
+scrape_configs:
+  # Control Plane API
+  - job_name: "mesh-api"
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - "api:8000"
+        labels:
+          service: "control-plane"
+          component: "api"
+
+  # Node exporter (if installed on relay hosts)
+  - job_name: "node"
+    static_configs:
+      - targets:
+          - "relay:9100"
+        labels:
+          service: "relay"
+
+  # Prometheus self-monitoring
+  - job_name: "prometheus"
+    static_configs:
+      - targets:
+          - "localhost:9090"
+
+# Alertmanager (optional)
+# alerting:
+#   alertmanagers:
+#     - static_configs:
+#         - targets: ["alertmanager:9093"]

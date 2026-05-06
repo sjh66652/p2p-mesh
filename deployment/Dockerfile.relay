@@ -1,0 +1,51 @@
+# P2P Mesh Network - Data Plane Relay Dockerfile
+# Multi-stage build for minimal image size
+
+# ---- Build Stage ----
+FROM rust:latest AS builder
+
+WORKDIR /build
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    pkg-config libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy Cargo.toml first for dependency caching
+COPY Cargo.toml ./
+
+# Create minimal source structure to cache dependencies
+RUN mkdir -p src/bin src/crypto src/tunnel src/relay && \
+    echo 'fn main() {}' > src/main.rs && \
+    echo 'pub mod crypto; pub mod tunnel; pub mod relay;' > src/lib.rs && \
+    echo 'fn main() {}' > src/bin/mesh-tunnel.rs && \
+    echo 'fn main() {}' > src/bin/mesh-relay.rs && \
+    echo '' > src/crypto/mod.rs && \
+    echo '' > src/tunnel/mod.rs && \
+    echo '' > src/relay/mod.rs
+
+# Cache dependencies (ignore errors for first build)
+RUN cargo build --release --bin mesh-relay 2>/dev/null || true
+
+# Copy actual source and build
+COPY src/ ./src/
+RUN touch src/lib.rs
+RUN cargo build --release --bin mesh-relay
+
+# ---- Runtime Stage ----
+FROM debian:bookworm-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN useradd --create-home --shell /bin/bash mesh
+USER mesh
+WORKDIR /app
+
+COPY --from=builder /build/target/release/mesh-relay /app/mesh-relay
+
+EXPOSE 51821/udp
+
+ENTRYPOINT ["/app/mesh-relay"]
+CMD ["--port", "51821"]

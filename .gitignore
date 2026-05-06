@@ -1,0 +1,48 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+.venv/
+venv/
+*.pyc
+
+# Rust
+target/
+Cargo.lock
+
+# Environment
+.env
+.env.prod
+*.env.local
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Docker
+*.log
+docker-compose.override.yml
+
+# Secrets & Certs
+*.pem
+*.key
+*.crt
+*.p12
+dhparam.pem
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Database
+*.db
+*.sqlite3
+*.dump
+
+# Backup
+*.bak
+*.backup
