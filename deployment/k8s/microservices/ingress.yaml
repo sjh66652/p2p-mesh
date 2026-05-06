@@ -1,0 +1,66 @@
+# P2P Mesh Network - Ingress Controller
+# Routes external traffic to the appropriate microservice by path prefix.
+# Requires an nginx-ingress controller installed in the cluster.
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: p2p-mesh-ingress
+  namespace: p2p-mesh
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: "1m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - mesh.example.com
+      secretName: mesh-tls
+  rules:
+    - host: mesh.example.com
+      http:
+        paths:
+          - path: /api/auth
+            pathType: Prefix
+            backend:
+              service:
+                name: auth-service
+                port:
+                  number: 8000
+          - path: /api/users
+            pathType: Prefix
+            backend:
+              service:
+                name: user-service
+                port:
+                  number: 8000
+          - path: /api/ws
+            pathType: Prefix
+            backend:
+              service:
+                name: signaling-service
+                port:
+                  number: 8000
+          - path: /api/signaling
+            pathType: Prefix
+            backend:
+              service:
+                name: signaling-service
+                port:
+                  number: 8000
+          - path: /api/relay
+            pathType: Prefix
+            backend:
+              service:
+                name: relay-service
+                port:
+                  number: 8000
+          - path: /api/usage
+            pathType: Prefix
+            backend:
+              service:
+                name: usage-service
+                port:
+                  number: 8000

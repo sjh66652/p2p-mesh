@@ -1,0 +1,826 @@
+# P2P Mesh Network - Microservices Deployments and Services
+# 5 HTTP microservices + 1 background worker.
+# Each service connects to shared PostgreSQL and Redis instances.
+
+---
+# ============================================================
+# Auth Service — Authentication, registration, token management
+# ============================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: auth-service
+  namespace: p2p-mesh
+spec:
+  selector:
+    app: auth-service
+  ports:
+    - port: 8000
+      targetPort: 8000
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: auth-service
+  namespace: p2p-mesh
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: auth-service
+  template:
+    metadata:
+      labels:
+        app: auth-service
+    spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app: auth-service
+                topologyKey: kubernetes.io/hostname
+      containers:
+        - name: auth-service
+          image: p2p-mesh-auth:latest
+          ports:
+            - containerPort: 8000
+          env:
+            - name: DATABASE_URL
+              value: "postgresql+asyncpg://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@$(POSTGRES_HOST):$(POSTGRES_PORT)/$(POSTGRES_DB)"
+            - name: REDIS_URL
+              value: "redis://:$(REDIS_PASSWORD)@$(REDIS_HOST):$(REDIS_PORT)/0"
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: mesh-secrets
+                  key: jwt-secret
+            - name: INTERNAL_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: mesh-secrets
+                  key: internal-api-key
+            - name: POSTGRES_USER
+              valueFrom:
+                configMapKeyRef:
+                  name: mesh-config
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mesh-secrets
+                  key: postgres-password
+            - name: POSTGRES_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: mesh-config
+                  key: POSTGRES_HOST
+            - name: POSTGRES_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: mesh-config
+                  key: POSTGRES_PORT
+            - name: POSTGRES_DB
+              valueFrom:
+                configMapKeyRef:
+                  name: mesh-config
+                  key: POSTGRES_DB
+            - name: REDIS_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: mesh-config
+                  key: REDIS_HOST
+            - name: REDIS_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: mesh-config
+                  key: REDIS_PORT
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mesh-secrets
+                  key: redis-password
+            - name: DEBUG
+              valueFrom:
+                configMapKeyRef:
+                  name: mesh-config
+                  key: DEBUG
+            - name: LOG_LEVEL
+              valueFrom:
+                configMapKeyRef:
+                  name: mesh-config
+                  key: LOG_LEVEL
+            - name: USAGE_SERVICE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: mesh-config
+                  key: USAGE_SERVICE_URL
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 30
+            periodSeconds: 30
+
+---
+# ============================================================
+# User Service — User profiles, device management, settings
+# ============================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: user-service
+  namespace: p2p-mesh
+spec:
+  selector:
+    app: user-service
+  ports:
+    - port: 8000
+      targetPort: 8000
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: user-service
+  namespace: p2p-mesh
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: user-service
+  template:
+    metadata:
+      labels:
+        app: user-service
+    spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app: user-service
+                topologyKey: kubernetes.io/hostname
+      containers:
+        - name: user-service
+          image: p2p-mesh-user:latest
+          ports:
+            - containerPort: 8000
+          env:
+            - name: DATABASE_URL
+              value: "postgresql+asyncpg://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@$(POSTGRES_HOST):$(POSTGRES_PORT)/$(POSTGRES_DB)"
+            - name: REDIS_URL
+              value: "redis://:$(REDIS_PASSWORD)@$(REDIS_HOST):$(REDIS_PORT)/0"
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: mesh-secrets
+                  key: jwt-secret
+            - name: INTERNAL_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: mesh-secrets
+                  key: internal-api-key
+            - name: POSTGRES_USER
+              valueFrom:
+                configMapKeyRef:
+                  name: mesh-config
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mesh-secrets
+                  key: postgres-password
+            - name: POSTGRES_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: mesh-config
+                  key: POSTGRES_HOST
+            - name: POSTGRES_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: mesh-config
+                  key: POSTGRES_PORT
+            - name: POSTGRES_DB
+              valueFrom:
+                configMapKeyRef:
+                  name: mesh-config
+                  key: POSTGRES_DB
+            - name: REDIS_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: mesh-config
+                  key: REDIS_HOST
+            - name: REDIS_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: mesh-config
+                  key: REDIS_PORT
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mesh-secrets
+                  key: redis-password
+            - name: DEBUG
+              valueFrom:
+                configMapKeyRef:
+                  name: mesh-config
+                  key: DEBUG
+            - name: LOG_LEVEL
+              valueFrom:
+                configMapKeyRef:
+                  name: mesh-config
+                  key: LOG_LEVEL
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 30
+            periodSeconds: 30
+
+---
+# ============================================================
+# Signaling Service — WebSocket signaling for P2P connections
+# Uses sticky sessions (ClientIP) for WebSocket affinity.
+# ============================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: signaling-service
+  namespace: p2p-mesh
+spec:
+  sessionAffinity: ClientIP
+  sessionAffinityConfig:
+    clientIP:
+      timeoutSeconds: 3600
+  selector:
+    app: signaling-service
+  ports:
+    - port: 8000
+      targetPort: 8000
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: signaling-service
+  namespace: p2p-mesh
+spec:
+  replicas: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: signaling-service
+  template:
+    metadata:
+      labels:
+        app: signaling-service
+    spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app: signaling-service
+                topologyKey: kubernetes.io/hostname
+      containers:
+        - name: signaling-service
+          image: p2p-mesh-signaling:latest
+          ports:
+            - containerPort: 8000
+          env:
+            - name: DATABASE_URL
+              value: "postgresql+asyncpg://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@$(POSTGRES_HOST):$(POSTGRES_PORT)/$(POSTGRES_DB)"
+            - name: REDIS_URL
+              value: "redis://:$(REDIS_PASSWORD)@$(REDIS_HOST):$(REDIS_PORT)/0"
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: mesh-secrets
+                  key: jwt-secret
+            - name: INTERNAL_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: mesh-secrets
+                  key: internal-api-key
+            - name: POSTGRES_USER
+              valueFrom:
+                configMapKeyRef:
+                  name: mesh-config
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mesh-secrets
+                  key: postgres-password
+            - name: POSTGRES_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: mesh-config
+                  key: POSTGRES_HOST
+            - name: POSTGRES_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: mesh-config
+                  key: POSTGRES_PORT
+            - name: POSTGRES_DB
+              valueFrom:
+                configMapKeyRef:
+                  name: mesh-config
+                  key: POSTGRES_DB
+            - name: REDIS_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: mesh-config
+                  key: REDIS_HOST
+            - name: REDIS_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: mesh-config
+                  key: REDIS_PORT
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mesh-secrets
+                  key: redis-password
+            - name: DEBUG
+              valueFrom:
+                configMapKeyRef:
+                  name: mesh-config
+                  key: DEBUG
+            - name: LOG_LEVEL
+              valueFrom:
+                configMapKeyRef:
+                  name: mesh-config
+                  key: LOG_LEVEL
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 30
+            periodSeconds: 30
+
+---
+# ============================================================
+# Relay Service — Relay node management and traffic reports
+# ============================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: relay-service
+  namespace: p2p-mesh
+spec:
+  selector:
+    app: relay-service
+  ports:
+    - port: 8000
+      targetPort: 8000
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: relay-service
+  namespace: p2p-mesh
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: relay-service
+  template:
+    metadata:
+      labels:
+        app: relay-service
+    spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app: relay-service
+                topologyKey: kubernetes.io/hostname
+      containers:
+        - name: relay-service
+          image: p2p-mesh-relay:latest
+          ports:
+            - containerPort: 8000
+          env:
+            - name: DATABASE_URL
+              value: "postgresql+asyncpg://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@$(POSTGRES_HOST):$(POSTGRES_PORT)/$(POSTGRES_DB)"
+            - name: REDIS_URL
+              value: "redis://:$(REDIS_PASSWORD)@$(REDIS_HOST):$(REDIS_PORT)/0"
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: mesh-secrets
+                  key: jwt-secret
+            - name: INTERNAL_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: mesh-secrets
+                  key: internal-api-key
+            - name: RELAY_AUTH_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: mesh-secrets
+                  key: relay-auth-token
+            - name: POSTGRES_USER
+              valueFrom:
+                configMapKeyRef:
+                  name: mesh-config
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mesh-secrets
+                  key: postgres-password
+            - name: POSTGRES_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: mesh-config
+                  key: POSTGRES_HOST
+            - name: POSTGRES_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: mesh-config
+                  key: POSTGRES_PORT
+            - name: POSTGRES_DB
+              valueFrom:
+                configMapKeyRef:
+                  name: mesh-config
+                  key: POSTGRES_DB
+            - name: REDIS_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: mesh-config
+                  key: REDIS_HOST
+            - name: REDIS_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: mesh-config
+                  key: REDIS_PORT
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mesh-secrets
+                  key: redis-password
+            - name: DEBUG
+              valueFrom:
+                configMapKeyRef:
+                  name: mesh-config
+                  key: DEBUG
+            - name: LOG_LEVEL
+              valueFrom:
+                configMapKeyRef:
+                  name: mesh-config
+                  key: LOG_LEVEL
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 30
+            periodSeconds: 30
+
+---
+# ============================================================
+# Usage Service — Resource quota management and abuse prevention
+# ============================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: usage-service
+  namespace: p2p-mesh
+spec:
+  selector:
+    app: usage-service
+  ports:
+    - port: 8000
+      targetPort: 8000
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: usage-service
+  namespace: p2p-mesh
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: usage-service
+  template:
+    metadata:
+      labels:
+        app: usage-service
+    spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app: usage-service
+                topologyKey: kubernetes.io/hostname
+      containers:
+        - name: usage-service
+          image: p2p-mesh-usage:latest
+          ports:
+            - containerPort: 8000
+          env:
+            - name: DATABASE_URL
+              value: "postgresql+asyncpg://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@$(POSTGRES_HOST):$(POSTGRES_PORT)/$(POSTGRES_DB)"
+            - name: REDIS_URL
+              value: "redis://:$(REDIS_PASSWORD)@$(REDIS_HOST):$(REDIS_PORT)/0"
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: mesh-secrets
+                  key: jwt-secret
+            - name: INTERNAL_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: mesh-secrets
+                  key: internal-api-key
+            - name: POSTGRES_USER
+              valueFrom:
+                configMapKeyRef:
+                  name: mesh-config
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mesh-secrets
+                  key: postgres-password
+            - name: POSTGRES_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: mesh-config
+                  key: POSTGRES_HOST
+            - name: POSTGRES_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: mesh-config
+                  key: POSTGRES_PORT
+            - name: POSTGRES_DB
+              valueFrom:
+                configMapKeyRef:
+                  name: mesh-config
+                  key: POSTGRES_DB
+            - name: REDIS_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: mesh-config
+                  key: REDIS_HOST
+            - name: REDIS_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: mesh-config
+                  key: REDIS_PORT
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mesh-secrets
+                  key: redis-password
+            - name: DEBUG
+              valueFrom:
+                configMapKeyRef:
+                  name: mesh-config
+                  key: DEBUG
+            - name: LOG_LEVEL
+              valueFrom:
+                configMapKeyRef:
+                  name: mesh-config
+                  key: LOG_LEVEL
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 30
+            periodSeconds: 30
+
+---
+# ============================================================
+# Worker — Background tasks (usage aggregation, cleanup)
+# No HTTP server — no Service, no readiness probe.
+# ============================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker
+  namespace: p2p-mesh
+spec:
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: worker
+  template:
+    metadata:
+      labels:
+        app: worker
+    spec:
+      containers:
+        - name: worker
+          image: p2p-mesh-worker:latest
+          env:
+            - name: DATABASE_URL
+              value: "postgresql+asyncpg://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@$(POSTGRES_HOST):$(POSTGRES_PORT)/$(POSTGRES_DB)"
+            - name: REDIS_URL
+              value: "redis://:$(REDIS_PASSWORD)@$(REDIS_HOST):$(REDIS_PORT)/0"
+            - name: INTERNAL_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: mesh-secrets
+                  key: internal-api-key
+            - name: POSTGRES_USER
+              valueFrom:
+                configMapKeyRef:
+                  name: mesh-config
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mesh-secrets
+                  key: postgres-password
+            - name: POSTGRES_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: mesh-config
+                  key: POSTGRES_HOST
+            - name: POSTGRES_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: mesh-config
+                  key: POSTGRES_PORT
+            - name: POSTGRES_DB
+              valueFrom:
+                configMapKeyRef:
+                  name: mesh-config
+                  key: POSTGRES_DB
+            - name: REDIS_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: mesh-config
+                  key: REDIS_HOST
+            - name: REDIS_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: mesh-config
+                  key: REDIS_PORT
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mesh-secrets
+                  key: redis-password
+            - name: LOG_LEVEL
+              valueFrom:
+                configMapKeyRef:
+                  name: mesh-config
+                  key: LOG_LEVEL
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true

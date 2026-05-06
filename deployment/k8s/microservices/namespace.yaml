@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: p2p-mesh
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: mesh-secrets
+  namespace: p2p-mesh
+type: Opaque
+stringData:
+  postgres-password: "${POSTGRES_PASSWORD}"
+  redis-password: "${REDIS_PASSWORD}"
+  jwt-secret: "${JWT_SECRET}"
+  internal-api-key: "${INTERNAL_API_KEY}"
+  relay-auth-token: "${RELAY_AUTH_TOKEN}"

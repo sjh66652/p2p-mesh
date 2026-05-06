@@ -1,0 +1,407 @@
+# P2P Mesh Network - Docker Compose (Microservices Architecture)
+# Individual services replace the monolith control-plane.
+# Each service runs independently with its own database schema.
+#
+# Usage:
+#   docker compose -f docker-compose.microservices.yml --env-file .env up -d
+#
+# Security: All secrets come from .env file. An .env.example is provided.
+# Copy .env.example to .env and change values before first launch.
+
+services:
+  # ============================================================
+  # API Gateway — Nginx reverse proxy with SSL termination
+  # Routes to individual microservices by path prefix.
+  # ============================================================
+  nginx:
+    image: nginx:1.25-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+    depends_on:
+      auth-service:
+        condition: service_healthy
+      user-service:
+        condition: service_healthy
+      signaling-service:
+        condition: service_healthy
+      relay-service:
+        condition: service_healthy
+      usage-service:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - mesh-net
+
+  # ============================================================
+  # Auth Service — Authentication, registration, token management
+  # ============================================================
+  auth-service:
+    build:
+      context: ..
+      dockerfile: services/auth-service/Dockerfile
+    init: true
+    expose:
+      - "8000"
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://mesh:${POSTGRES_PASSWORD}@postgres:5432/p2p_mesh
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
+      - JWT_SECRET=${JWT_SECRET}
+      - INTERNAL_API_KEY=${INTERNAL_API_KEY}
+      - DEBUG=${DEBUG:-false}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      # Uncomment these lines to enable OpenTelemetry tracing:
+      # - OTEL_ENABLED=true
+      # - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - mesh-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 90s
+
+  # ============================================================
+  # User Service — User profiles, device management, settings
+  # ============================================================
+  user-service:
+    build:
+      context: ..
+      dockerfile: services/user-service/Dockerfile
+    init: true
+    expose:
+      - "8000"
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://mesh:${POSTGRES_PASSWORD}@postgres:5432/p2p_mesh
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
+      - JWT_SECRET=${JWT_SECRET}
+      - INTERNAL_API_KEY=${INTERNAL_API_KEY}
+      - DEBUG=${DEBUG:-false}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      # Uncomment these lines to enable OpenTelemetry tracing:
+      # - OTEL_ENABLED=true
+      # - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - mesh-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 90s
+
+  # ============================================================
+  # Signaling Service — WebSocket signaling for P2P connections
+  # ============================================================
+  signaling-service:
+    build:
+      context: ..
+      dockerfile: services/signaling-service/Dockerfile
+    init: true
+    expose:
+      - "8000"
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://mesh:${POSTGRES_PASSWORD}@postgres:5432/p2p_mesh
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
+      - JWT_SECRET=${JWT_SECRET}
+      - INTERNAL_API_KEY=${INTERNAL_API_KEY}
+      - DEBUG=${DEBUG:-false}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      # Uncomment these lines to enable OpenTelemetry tracing:
+      # - OTEL_ENABLED=true
+      # - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - mesh-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 90s
+
+  # ============================================================
+  # Relay Service — Relay node management and traffic reports
+  # ============================================================
+  relay-service:
+    build:
+      context: ..
+      dockerfile: services/relay-service/Dockerfile
+    init: true
+    expose:
+      - "8000"
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://mesh:${POSTGRES_PASSWORD}@postgres:5432/p2p_mesh
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
+      - JWT_SECRET=${JWT_SECRET}
+      - INTERNAL_API_KEY=${INTERNAL_API_KEY}
+      - RELAY_AUTH_TOKEN=${RELAY_AUTH_TOKEN}
+      - DEBUG=${DEBUG:-false}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      # Uncomment these lines to enable OpenTelemetry tracing:
+      # - OTEL_ENABLED=true
+      # - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - mesh-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 90s
+
+  # ============================================================
+  # Usage Service — Resource quota management and abuse prevention
+  # Tracks usage metrics, enforces plan limits, rate limiting.
+  # ============================================================
+  usage-service:
+    build:
+      context: ..
+      dockerfile: services/usage-service/Dockerfile
+    init: true
+    expose:
+      - "8000"
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://mesh:${POSTGRES_PASSWORD}@postgres:5432/p2p_mesh
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
+      - JWT_SECRET=${JWT_SECRET}
+      - INTERNAL_API_KEY=${INTERNAL_API_KEY}
+      - DEBUG=${DEBUG:-false}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      # Uncomment these lines to enable OpenTelemetry tracing:
+      # - OTEL_ENABLED=true
+      # - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - mesh-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 90s
+
+  # ============================================================
+  # Background task worker
+  # Processes usage records, log aggregation, and periodic cleanup.
+  # ============================================================
+  worker:
+    build:
+      context: ..
+      dockerfile: services/worker/Dockerfile
+    init: true
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://mesh:${POSTGRES_PASSWORD}@postgres:5432/p2p_mesh
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - mesh-net
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f 'app.worker' || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 15s
+
+  # ============================================================
+  # PostgreSQL 16 — Primary database (shared across all services)
+  # ============================================================
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: mesh
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: p2p_mesh
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mesh -d p2p_mesh"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - mesh-net
+
+  # ============================================================
+  # Redis 7 — Cache, signaling pub/sub, rate limit counters
+  # ============================================================
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - redis_data:/data
+    command: >
+      redis-server
+      --appendonly yes
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+      --requirepass ${REDIS_PASSWORD}
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli --no-auth-warning ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    environment:
+      REDISCLI_AUTH: ${REDIS_PASSWORD}
+    restart: unless-stopped
+    networks:
+      - mesh-net
+
+  # ============================================================
+  # Relay Node — High-performance UDP packet forwarder (Rust)
+  # ============================================================
+  relay:
+    build:
+      context: ../data-plane
+      dockerfile: ../deployment/Dockerfile.relay
+    ports:
+      - "51821:51821/udp"
+    environment:
+      - API_URL=http://relay-service:8000
+      - RELAY_AUTH_TOKEN=${RELAY_AUTH_TOKEN}
+      - RELAY_ID=${RELAY_ID:-relay-primary}
+      - REGION=default
+      - RELAY_PORT=51821
+      - HEARTBEAT_INTERVAL=30
+    depends_on:
+      - relay-service
+    restart: unless-stopped
+    networks:
+      - mesh-net
+
+  # ============================================================
+  # Prometheus — Metrics collection
+  # ============================================================
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "127.0.0.1:9090:9090"
+    volumes:
+      - ../monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=15d'
+    restart: unless-stopped
+    networks:
+      - mesh-net
+
+  # ============================================================
+  # Grafana — Metrics dashboards
+  # ============================================================
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "127.0.0.1:3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD}
+      - GF_AUTH_ANONYMOUS_ENABLED=false
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ../monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ../monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+    networks:
+      - mesh-net
+
+  # ============================================================
+  # Loki — Log aggregation
+  # ============================================================
+  loki:
+    image: grafana/loki:latest
+    user: root
+    ports:
+      - "127.0.0.1:3100:3100"
+    volumes:
+      - ../monitoring/loki-config.yaml:/etc/loki/local-config.yaml:ro
+      - loki_data:/tmp/loki
+    command: -config.file=/etc/loki/local-config.yaml
+    restart: unless-stopped
+    networks:
+      - mesh-net
+
+  # ============================================================
+  # Promtail — Log collector (ships container logs to Loki)
+  # ============================================================
+  promtail:
+    image: grafana/promtail:latest
+    volumes:
+      - ../monitoring/promtail-config.yaml:/etc/promtail/config.yml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /var/log:/var/log:ro
+    command: -config.file=/etc/promtail/config.yml
+    restart: unless-stopped
+    networks:
+      - mesh-net
+
+  # ============================================================
+  # Jaeger — Distributed tracing (OTLP collector + UI)
+  # ============================================================
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    ports:
+      - "127.0.0.1:16686:16686"   # UI
+      - "127.0.0.1:4317:4317"     # OTLP gRPC
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    restart: unless-stopped
+    networks:
+      - mesh-net
+
+volumes:
+  postgres_data:
+  redis_data:
+  prometheus_data:
+  grafana_data:
+  loki_data:
+
+networks:
+  mesh-net:
+    driver: bridge

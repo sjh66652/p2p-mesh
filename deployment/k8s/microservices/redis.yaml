@@ -1,0 +1,70 @@
+# P2P Mesh Network - Redis Deployment
+# In-memory cache, signaling pub/sub, and rate-limit counters.
+# Uses a password from the mesh-secrets Secret.
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+  namespace: p2p-mesh
+spec:
+  selector:
+    app: redis
+  ports:
+    - port: 6379
+      targetPort: 6379
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+  namespace: p2p-mesh
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redis
+  template:
+    metadata:
+      labels:
+        app: redis
+    spec:
+      containers:
+        - name: redis
+          image: redis:7-alpine
+          command:
+            - redis-server
+            - --appendonly
+            - "yes"
+            - --maxmemory
+            - "256mb"
+            - --maxmemory-policy
+            - allkeys-lru
+            - --requirepass
+            - "$(REDIS_PASSWORD)"
+          env:
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mesh-secrets
+                  key: redis-password
+            - name: REDISCLI_AUTH
+              valueFrom:
+                secretKeyRef:
+                  name: mesh-secrets
+                  key: redis-password
+          ports:
+            - containerPort: 6379
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          readinessProbe:
+            exec:
+              command: ["redis-cli", "--no-auth-warning", "ping"]
+            initialDelaySeconds: 5
+            periodSeconds: 10

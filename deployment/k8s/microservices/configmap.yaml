@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mesh-config
+  namespace: p2p-mesh
+data:
+  DEBUG: "false"
+  LOG_LEVEL: "INFO"
+  POSTGRES_HOST: "postgres"
+  POSTGRES_PORT: "5432"
+  POSTGRES_DB: "p2p_mesh"
+  POSTGRES_USER: "mesh"
+  REDIS_HOST: "redis"
+  REDIS_PORT: "6379"
+  AUTH_SERVICE_URL: "http://auth-service:8000"
+  USER_SERVICE_URL: "http://user-service:8000"
+  SIGNALING_SERVICE_URL: "http://signaling-service:8000"
+  RELAY_SERVICE_URL: "http://relay-service:8000"
+  USAGE_SERVICE_URL: "http://usage-service:8000"

@@ -1,0 +1,452 @@
+# P2P Mesh Network - Production Docker Compose (Microservices)
+# 用于单机生产部署。多机部署用 Kubernetes。
+#
+# 与 dev 版的区别：
+#   - 镜像从仓库拉取（从 CI/CD 构建），非本地构建
+#   - Nginx 启用 SSL
+#   - 数据库密码通过环境变量传入
+#   - 资源限制更严格
+#   - JSON 日志驱动 + 轮转
+#   - 非标准端口不暴露到宿主机
+#
+# 启动：
+#   docker compose -f docker-compose.microservices.prod.yml --env-file ../.env.prod up -d
+
+version: "3.8"
+
+services:
+  # ============================================================
+  # API Gateway — Nginx reverse proxy with SSL termination
+  # Routes to individual microservices by path prefix.
+  # ============================================================
+  nginx:
+    image: nginx:1.25-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.prod.conf:/etc/nginx/nginx.conf:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+      - ./nginx/dhparam.pem:/etc/nginx/dhparam.pem:ro
+    depends_on:
+      - auth-service
+      - user-service
+      - signaling-service
+      - relay-service
+      - usage-service
+    restart: unless-stopped
+    networks:
+      - mesh-net
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "3"
+
+  # ============================================================
+  # Auth Service — Authentication, registration, token management
+  # ============================================================
+  auth-service:
+    image: ${DOCKER_REGISTRY:-yourorg}/p2p-mesh-auth-service:${IMAGE_TAG:-latest}
+    init: true
+    expose:
+      - "8000"
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://mesh:${POSTGRES_PASSWORD}@postgres:5432/p2p_mesh
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
+      - JWT_SECRET=${JWT_SECRET}
+      - INTERNAL_API_KEY=${INTERNAL_API_KEY}
+      - DEBUG=false
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - LOG_FORMAT=json
+      - USAGE_SERVICE_URL=http://usage-service:8000
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - mesh-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 90s
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+        reservations:
+          cpus: '0.1'
+          memory: 128M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "3"
+
+  # ============================================================
+  # User Service — User profiles, device management, settings
+  # ============================================================
+  user-service:
+    image: ${DOCKER_REGISTRY:-yourorg}/p2p-mesh-user-service:${IMAGE_TAG:-latest}
+    init: true
+    expose:
+      - "8000"
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://mesh:${POSTGRES_PASSWORD}@postgres:5432/p2p_mesh
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
+      - JWT_SECRET=${JWT_SECRET}
+      - INTERNAL_API_KEY=${INTERNAL_API_KEY}
+      - DEBUG=false
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - LOG_FORMAT=json
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - mesh-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 90s
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+        reservations:
+          cpus: '0.1'
+          memory: 128M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "3"
+
+  # ============================================================
+  # Signaling Service — WebSocket signaling for P2P connections
+  # ============================================================
+  signaling-service:
+    image: ${DOCKER_REGISTRY:-yourorg}/p2p-mesh-signaling-service:${IMAGE_TAG:-latest}
+    init: true
+    expose:
+      - "8000"
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://mesh:${POSTGRES_PASSWORD}@postgres:5432/p2p_mesh
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
+      - JWT_SECRET=${JWT_SECRET}
+      - INTERNAL_API_KEY=${INTERNAL_API_KEY}
+      - DEBUG=false
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - LOG_FORMAT=json
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - mesh-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 90s
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+        reservations:
+          cpus: '0.1'
+          memory: 128M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "3"
+
+  # ============================================================
+  # Relay Service — Relay node management and traffic reports
+  # ============================================================
+  relay-service:
+    image: ${DOCKER_REGISTRY:-yourorg}/p2p-mesh-relay-service:${IMAGE_TAG:-latest}
+    init: true
+    expose:
+      - "8000"
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://mesh:${POSTGRES_PASSWORD}@postgres:5432/p2p_mesh
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
+      - JWT_SECRET=${JWT_SECRET}
+      - INTERNAL_API_KEY=${INTERNAL_API_KEY}
+      - RELAY_AUTH_TOKEN=${RELAY_AUTH_TOKEN}
+      - DEBUG=false
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - LOG_FORMAT=json
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - mesh-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 90s
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+        reservations:
+          cpus: '0.1'
+          memory: 128M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "3"
+
+  # ============================================================
+  # Usage Service — Resource quota management and abuse prevention
+  # ============================================================
+  usage-service:
+    image: ${DOCKER_REGISTRY:-yourorg}/p2p-mesh-usage-service:${IMAGE_TAG:-latest}
+    init: true
+    expose:
+      - "8000"
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://mesh:${POSTGRES_PASSWORD}@postgres:5432/p2p_mesh
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
+      - JWT_SECRET=${JWT_SECRET}
+      - INTERNAL_API_KEY=${INTERNAL_API_KEY}
+      - DEBUG=false
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - LOG_FORMAT=json
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - mesh-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 90s
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+        reservations:
+          cpus: '0.1'
+          memory: 128M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "3"
+
+  # ============================================================
+  # Worker — Background tasks (usage aggregation, cleanup)
+  # ============================================================
+  worker:
+    image: ${DOCKER_REGISTRY:-yourorg}/p2p-mesh-worker:${IMAGE_TAG:-latest}
+    init: true
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://mesh:${POSTGRES_PASSWORD}@postgres:5432/p2p_mesh
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - LOG_FORMAT=json
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - mesh-net
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f 'app.worker' || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.1'
+          memory: 128M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "2"
+
+  # ============================================================
+  # PostgreSQL 16 — Primary database (shared across all services)
+  # ============================================================
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: mesh
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: p2p_mesh
+    # 生产环境不暴露端口到宿主机
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mesh -d p2p_mesh"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - mesh-net
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "3"
+    # 生产环境建议用云厂商 RDS 替代容器化 PostgreSQL
+
+  # ============================================================
+  # Redis 7 — Cache, signaling pub/sub, rate limit counters
+  # ============================================================
+  redis:
+    image: redis:7-alpine
+    volumes:
+      - redis_data:/data
+    command: >
+      redis-server
+      --appendonly yes
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+      --requirepass ${REDIS_PASSWORD}
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli --no-auth-warning ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    environment:
+      REDISCLI_AUTH: ${REDIS_PASSWORD}
+    restart: unless-stopped
+    networks:
+      - mesh-net
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "2"
+
+  # ============================================================
+  # Relay Node — High-performance UDP packet forwarder (Rust)
+  # ============================================================
+  relay:
+    image: ${DOCKER_REGISTRY:-yourorg}/p2p-mesh-relay:${IMAGE_TAG:-latest}
+    ports:
+      - "51821:51821/udp"
+    environment:
+      - API_URL=http://relay-service:8000
+      - RELAY_AUTH_TOKEN=${RELAY_AUTH_TOKEN}
+      - RELAY_ID=${RELAY_ID:-relay-primary}
+      - REGION=${RELAY_REGION:-default}
+      - RELAY_PORT=51821
+      - HEARTBEAT_INTERVAL=30
+    depends_on:
+      - relay-service
+    restart: unless-stopped
+    networks:
+      - mesh-net
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "3"
+
+  # ============================================================
+  # Prometheus — Metrics collection
+  # ============================================================
+  prometheus:
+    image: prom/prometheus:latest
+    volumes:
+      - ../monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=30d'
+    restart: unless-stopped
+    networks:
+      - mesh-net
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "3"
+
+  # ============================================================
+  # Grafana — Metrics dashboards
+  # ============================================================
+  grafana:
+    image: grafana/grafana:latest
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD}
+      - GF_AUTH_ANONYMOUS_ENABLED=false
+      - GF_SERVER_ROOT_URL=https://monitor.yourdomain.com
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ../monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+    networks:
+      - mesh-net
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "2"
+
+volumes:
+  postgres_data:
+  redis_data:
+  prometheus_data:
+  grafana_data:
+
+networks:
+  mesh-net:
+    driver: bridge

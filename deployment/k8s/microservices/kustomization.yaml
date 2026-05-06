@@ -1,0 +1,33 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: p2p-mesh
+
+resources:
+  - namespace.yaml
+  - configmap.yaml
+  - postgres.yaml
+  - redis.yaml
+  - services.yaml
+  - ingress.yaml
+  - hpa.yaml
+
+images:
+  - name: p2p-mesh-auth
+    newName: ${DOCKER_REGISTRY}/p2p-mesh-auth
+    newTag: ${IMAGE_TAG}
+  - name: p2p-mesh-user
+    newName: ${DOCKER_REGISTRY}/p2p-mesh-user
+    newTag: ${IMAGE_TAG}
+  - name: p2p-mesh-signaling
+    newName: ${DOCKER_REGISTRY}/p2p-mesh-signaling
+    newTag: ${IMAGE_TAG}
+  - name: p2p-mesh-relay
+    newName: ${DOCKER_REGISTRY}/p2p-mesh-relay
+    newTag: ${IMAGE_TAG}
+  - name: p2p-mesh-usage
+    newName: ${DOCKER_REGISTRY}/p2p-mesh-usage
+    newTag: ${IMAGE_TAG}
+  - name: p2p-mesh-worker
+    newName: ${DOCKER_REGISTRY}/p2p-mesh-worker
+    newTag: ${IMAGE_TAG}
