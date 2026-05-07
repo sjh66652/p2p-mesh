@@ -17,7 +17,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from jose import jwt, JWTError
 
 from app.config import settings
-from app.database import get_db, get_redis
+from app.database import get_redis, async_session_factory
 from app.services.signaling_service import signaling_hub
 
 logger = logging.getLogger("p2p-mesh.ws")
@@ -66,13 +66,12 @@ async def websocket_endpoint(
         return
 
     # Check JWT blacklist (logout revocation) — same as REST endpoints
-    async for redis_conn in get_redis():
-        is_blacklisted = await redis_conn.exists(f"jwt_blacklist:{jti}")
-        if is_blacklisted:
-            await ws.send_json({"type": "error", "message": "Token has been revoked"})
-            await ws.close(code=4001)
-            return
-        break
+    redis_conn = await get_redis()
+    is_blacklisted = await redis_conn.exists(f"jwt_blacklist:{jti}")
+    if is_blacklisted:
+        await ws.send_json({"type": "error", "message": "Token has been revoked"})
+        await ws.close(code=4001)
+        return
 
     try:
         user_id = uuid.UUID(user_id_str)
@@ -83,7 +82,7 @@ async def websocket_endpoint(
 
     # ---- Phase 3: Verify device ownership ----
     # This prevents attackers from connecting as another user's device
-    async for db in get_db():
+    async with async_session_factory() as db:
         from app.models.device import Device
         from sqlalchemy import select
 
@@ -92,10 +91,6 @@ async def websocket_endpoint(
         except ValueError:
             await ws.send_json({"type": "error", "message": "Invalid device ID"})
             await ws.close(code=4002)
-            try:
-                await db.close()
-            except Exception:
-                pass
             return
 
         result = await db.execute(
@@ -110,16 +105,7 @@ async def websocket_endpoint(
             )
             await ws.send_json({"type": "error", "message": "Device not authorized"})
             await ws.close(code=4003)
-            try:
-                await db.close()
-            except Exception:
-                pass
             return
-
-        try:
-            await db.close()
-        except Exception:
-            pass
 
     # ---- Phase 4: Register in signaling hub ----
     dev_uuid = uuid.UUID(device_id)
@@ -335,8 +321,8 @@ async def handle_signal(
             await ws.send_json({"type": "error", "message": "Invalid ICE candidate"})
             return
         payload["candidate"] = candidate
-        payload["sdp_mid"] = msg.get("sdp_mid")
-        payload["sdp_mline_index"] = msg.get("sdp_mline_index")
+        payload["sdp_mid"] = msg.get("sdp_mid", "")
+        payload["sdp_mline_index"] = msg.get("sdp_mline_index", 0)
 
     delivered = await signaling_hub.relay_signal(
         device_id, target_id, msg_type, payload,

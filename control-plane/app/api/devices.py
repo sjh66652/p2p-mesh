@@ -36,7 +36,7 @@ async def list_devices(
     """List all devices belonging to the current user."""
     devices = await device_service.get_user_devices(db, user.id)
     return DeviceListResponse(
-        devices=devices,
+        devices=devices,  # type: ignore[arg-type]  # Pydantic from_attributes converts ORM -> schema
         total=len(devices),
     )
 

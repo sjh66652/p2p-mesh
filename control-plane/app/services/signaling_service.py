@@ -12,7 +12,6 @@ import asyncio
 import logging
 import uuid
 from dataclasses import dataclass, field
-from typing import Dict, Set
 
 from fastapi import WebSocket
 
@@ -44,15 +43,15 @@ class SignalingHub:
 
     def __init__(self):
         # device_id -> DeviceConnection
-        self._connections: Dict[uuid.UUID, DeviceConnection] = {}
+        self._connections: dict[uuid.UUID, DeviceConnection] = {}
         # user_id -> set of device_ids
-        self._user_devices: Dict[uuid.UUID, Set[uuid.UUID]] = {}
+        self._user_devices: dict[uuid.UUID, set[uuid.UUID]] = {}
         # device_id -> list of candidates (for NAT traversal)
-        self._candidates: Dict[uuid.UUID, list] = {}
+        self._candidates: dict[uuid.UUID, list[dict[str, object]]] = {}
         # device_id -> nat_type
-        self._nat_types: Dict[uuid.UUID, str] = {}
+        self._nat_types: dict[uuid.UUID, str] = {}
         # device_id -> public_addr
-        self._public_addrs: Dict[uuid.UUID, str] = {}
+        self._public_addrs: dict[uuid.UUID, str] = {}
         self._lock = asyncio.Lock()
 
     async def connect(

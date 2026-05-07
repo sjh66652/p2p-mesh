@@ -40,6 +40,10 @@ class CandidateListResponse(BaseModel):
 class NATProbeRequest(BaseModel):
     """Request to probe NAT type."""
     device_id: str = Field(..., description="Device UUID")
+    mapped_addrs: List[str] = Field(
+        default_factory=list,
+        description="Mapped addresses discovered from STUN probing (ip:port)"
+    )
     stun_servers: Optional[List[str]] = Field(
         default=None,
         description="STUN servers to probe (defaults to configured servers)"

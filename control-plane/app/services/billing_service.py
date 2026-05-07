@@ -25,7 +25,7 @@ def apply_qos(user_plan: str) -> str:
         UserPlan.PRO: settings.PRO_PLAN_BANDWIDTH_MBPS,
         UserPlan.ENTERPRISE: settings.ENTERPRISE_PLAN_BANDWIDTH_MBPS,
     }
-    limit = plan_map.get(user_plan, settings.FREE_PLAN_BANDWIDTH_MBPS)
+    limit = plan_map.get(user_plan, settings.FREE_PLAN_BANDWIDTH_MBPS)  # type: ignore[call-overload]
     if limit <= 0:
         return "unlimited"
     return f"{limit}MB/s"

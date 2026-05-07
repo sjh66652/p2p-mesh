@@ -3,6 +3,8 @@ Database connection and session management.
 PostgreSQL via SQLAlchemy (async) + Redis for caching/signaling.
 """
 
+from collections.abc import AsyncGenerator
+
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase
 import redis.asyncio as aioredis
@@ -31,7 +33,7 @@ class Base(DeclarativeBase):
     pass
 
 
-async def get_db() -> AsyncSession:
+async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """FastAPI dependency: yields an async database session."""
     async with async_session_factory() as session:
         try:
@@ -70,4 +72,5 @@ async def get_redis() -> aioredis.Redis:
     """FastAPI dependency: yields Redis client."""
     if redis_client is None:
         await init_redis()
+    assert redis_client is not None, "Redis client not initialized"
     return redis_client
