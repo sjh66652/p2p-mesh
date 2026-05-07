@@ -26,7 +26,7 @@ use chacha20poly1305::{
 };
 use rand::RngCore;
 use sha2::{Digest, Sha256};
-use x25519_dalek::{PublicKey, EphemeralSecret, ReusableSecret};
+use x25519_dalek::{PublicKey, ReusableSecret};
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 /// Noise handshake state.
@@ -91,22 +91,12 @@ impl NoiseStaticKeypair {
         Self { secret, public }
     }
 
-    /// Create from existing 32-byte secret key.
-    pub fn from_secret(secret_bytes: &[u8; 32]) -> Self {
-        let secret = ReusableSecret::from(*secret_bytes);
-        let public = PublicKey::from(&secret);
-        Self { secret, public }
-    }
 
     /// Get the 32-byte public key.
     pub fn public_key_bytes(&self) -> [u8; 32] {
         *self.public.as_bytes()
     }
 
-    /// Get the 32-byte secret key.
-    pub fn secret_key_bytes(&self) -> [u8; 32] {
-        self.secret.to_bytes()
-    }
 }
 
 impl NoiseIKHandshake {
@@ -143,7 +133,7 @@ impl NoiseIKHandshake {
             return Err(NoiseError::InvalidState);
         }
 
-        // Generate ephemeral keypair using EphemeralSecret so the same secret
+        // Generate ephemeral keypair using ReusableSecret so the same secret
         // can be used for es DH now and ee/se DH later in process_responder_message.
         let ephemeral_secret = ReusableSecret::random_from_rng(rand::thread_rng());
         let ephemeral_public = PublicKey::from(&ephemeral_secret);
@@ -344,7 +334,7 @@ impl NoiseIKHandshake {
         // Reconstruct initiator's ephemeral public key
         let init_ephemeral = PublicKey::from(self.peer_ephemeral_public);
 
-        // Generate responder's ephemeral keypair using EphemeralSecret so
+        // Generate responder's ephemeral keypair using ReusableSecret so
         // the same secret can be used in multiple diffie_hellman calls if needed.
         let resp_ephemeral_secret = ReusableSecret::random_from_rng(rand::thread_rng());
         let resp_ephemeral_public = PublicKey::from(&resp_ephemeral_secret);
@@ -552,9 +542,9 @@ mod tests {
     fn test_static_keypair_generation() {
         let kp = NoiseStaticKeypair::generate();
         let public = kp.public_key_bytes();
-        let secret = kp.secret_key_bytes();
         assert_eq!(public.len(), 32);
-        assert_eq!(secret.len(), 32);
+        // Note: ReusableSecret intentionally does not expose raw bytes
+        // for security (discourages long-term secret key storage)
     }
 
     #[test]
