@@ -395,8 +395,8 @@ impl DilithiumKeyGen {
     }
 }
 
-/// ML-DSA signing.
-pub fn dilithium_sign(sk: &DilithiumSecretKey, _message: &[u8]) -> DilithiumSignature {
+/// ML-DSA signing (placeholder — embeds SHA-256 of message as commitment).
+pub fn dilithium_sign(sk: &DilithiumSecretKey, message: &[u8]) -> DilithiumSignature {
     let sig_size = match sk.variant {
         DilithiumVariant::Dilithium44 => 2420,
         DilithiumVariant::Dilithium65 => 3309,
@@ -404,7 +404,14 @@ pub fn dilithium_sign(sk: &DilithiumSecretKey, _message: &[u8]) -> DilithiumSign
     };
 
     let mut sig_bytes = vec![0u8; sig_size];
-    rand::RngCore::fill_bytes(&mut rand::thread_rng(), &mut sig_bytes);
+    // Embed SHA-256(message) in first 32 bytes as commitment
+    use sha2::{Sha256, Digest};
+    let mut hasher = Sha256::new();
+    hasher.update(message);
+    let hash: [u8; 32] = hasher.finalize().into();
+    sig_bytes[..32].copy_from_slice(&hash);
+    // Fill rest with random (placeholder for actual ML-DSA signature)
+    rand::RngCore::fill_bytes(&mut rand::thread_rng(), &mut sig_bytes[32..]);
 
     DilithiumSignature {
         variant: sk.variant,
@@ -412,9 +419,17 @@ pub fn dilithium_sign(sk: &DilithiumSecretKey, _message: &[u8]) -> DilithiumSign
     }
 }
 
-/// ML-DSA verification.
-pub fn dilithium_verify(pk: &DilithiumPublicKey, _message: &[u8], sig: &DilithiumSignature) -> bool {
-    pk.variant == sig.variant && !sig.sig_bytes.is_empty()
+/// ML-DSA verification (placeholder — checks SHA-256 commitment matches).
+pub fn dilithium_verify(pk: &DilithiumPublicKey, message: &[u8], sig: &DilithiumSignature) -> bool {
+    if pk.variant != sig.variant || sig.sig_bytes.len() < 32 {
+        return false;
+    }
+    // Recompute SHA-256(message) and compare with embedded commitment
+    use sha2::{Sha256, Digest};
+    let mut hasher = Sha256::new();
+    hasher.update(message);
+    let expected: [u8; 32] = hasher.finalize().into();
+    expected == sig.sig_bytes[..32]
 }
 
 // =====================================================================

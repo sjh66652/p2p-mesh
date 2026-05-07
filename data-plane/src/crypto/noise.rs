@@ -358,12 +358,14 @@ impl NoiseIKHandshake {
         self.state = HandshakeState::Established;
 
         let (send_key, recv_key) = split(&self.chaining_key);
+        // Responder swaps: send=recv_key(k2), recv=send_key(k1)
+        // because initiator uses send=k1, recv=k2
 
         log::info!("Noise IK: Handshake established (responder)");
         Ok((
             resp_ephemeral_bytes.to_vec(),
-            NoiseTransportKey::new(send_key),
             NoiseTransportKey::new(recv_key),
+            NoiseTransportKey::new(send_key),
         ))
     }
 

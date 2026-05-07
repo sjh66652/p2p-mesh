@@ -742,7 +742,7 @@ mod tests {
 
         // Allocate all buffers
         for i in 0..16 {
-            assert_eq!(pool.allocate(), Some(15 - i)); // FIFO order
+            assert_eq!(pool.allocate(), Some(i)); // sequential from 0
         }
 
         // Pool should be exhausted

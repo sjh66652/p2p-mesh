@@ -408,7 +408,7 @@ mod tests {
         NetworkPath {
             path_id: id.to_string(),
             remote_addr: if ip_ver == IpVersion::V6 {
-                "::1:9999".parse().unwrap()
+                "[::1]:9999".parse().unwrap()
             } else {
                 "10.0.0.1:9999".parse().unwrap()
             },

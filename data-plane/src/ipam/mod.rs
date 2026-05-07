@@ -151,7 +151,7 @@ impl IpamManager {
 
     /// Check if an IP is within the overlay prefix.
     pub fn is_overlay_ip(ip: Ipv4Addr) -> bool {
-        let prefix: Ipv4Net = OVERLAY_PREFIX.parse().unwrap();
+        let prefix: Ipv4Net = format!("{}/{}", OVERLAY_PREFIX, OVERLAY_PREFIX_LEN).parse().unwrap();
         prefix.contains(&ip)
     }
 
