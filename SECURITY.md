@@ -262,4 +262,5 @@ docker compose logs api | grep "Cross-user signaling blocked"
 2. Relay list endpoint exposed internal IPs to all authenticated users
 3. Signaling hub in-memory only — breaks with multiple API replicas (Redis pub/sub planned)
 4. Hole punch packet had static `"P2P_MESH_PUNCH"` payload (easily fingerprintable by DPI)
-5. Grafana defaulted to admin/admin credentials when env va
+5. Grafana defaulted to admin/admin credentials when env var unset
+6. K8s relay DaemonSet used hostNetwork with NET_ADMIN+NET_RAW capabilities

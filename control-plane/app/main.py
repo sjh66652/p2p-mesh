@@ -14,7 +14,7 @@ from starlette.responses import Response
 
 from app.config import settings
 from app.database import engine, Base
-from app.api import auth, devices, network, relay, traffic, billing, ws, candidates
+from app.api import auth, devices, network, relay, traffic, billing, ws, candidates, ipam, acl
 from app.middleware.rate_limit import RateLimitMiddleware
 from app.middleware.logging import LoggingMiddleware
 
@@ -214,6 +214,8 @@ app.include_router(traffic.router, prefix="/api/v1/traffic", tags=["Traffic"])
 app.include_router(billing.router, prefix="/api/v1/billing", tags=["Billing"])
 app.include_router(ws.router, prefix="/api/v1/ws", tags=["Signaling"])
 app.include_router(candidates.router, prefix="/api/v1/candidates", tags=["NAT Traversal"])
+app.include_router(ipam.router, prefix="/api/v1/network/ipam", tags=["IPAM"])
+app.include_router(acl.router, tags=["ACL"])
 
 
 @app.get("/health", tags=["System"])

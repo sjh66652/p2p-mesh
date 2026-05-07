@@ -1,12 +1,28 @@
 [package]
 name = "p2p-mesh-dataplane"
-version = "1.0.0"
+version = "2.0.0"
 edition = "2021"
-description = "High-performance P2P mesh networking data plane with NAT traversal"
+description = "High-performance Overlay Mesh Network data plane — TUN, routing, IPAM, ACL, ICE/TURN, QUIC"
 
 [dependencies]
 # Async runtime
 tokio = { version = "1", features = ["full"] }
+
+# TUN/TAP virtual network interface
+tun = "0.6"
+
+# IP network types (CIDR, IpNet)
+ipnet = "2"
+
+# DNS protocol
+trust-dns-proto = "0.23"
+trust-dns-resolver = "0.23"
+
+# JSON Schema validation for ACL policies
+jsonschema = "0.17"
+
+# UUID generation
+uuid = { version = "1", features = ["v4"] }
 
 # UDP socket operations
 socket2 = "0.5"
@@ -14,6 +30,9 @@ socket2 = "0.5"
 # Cryptography: ChaCha20-Poly1305 (AEAD)
 chacha20poly1305 = "0.10"
 chacha20 = "0.9"
+
+# Noise Protocol Framework (WireGuard-like crypto)
+snow = "0.9"
 
 # Random number generation
 rand = "0.8"
@@ -51,7 +70,7 @@ zeroize = { version = "1", features = ["derive"] }
 # Time utilities
 chrono = "0.4"
 
-# Phase 2: QUIC Transport
+# QUIC Transport
 quinn = "0.11"
 rustls = { version = "0.23", features = ["ring"] }
 rcgen = { version = "0.13" }
@@ -60,6 +79,12 @@ rcgen = { version = "0.13" }
 thiserror = "2.0"
 tokio-util = { version = "0.7", features = ["codec"] }
 bytes = "1"
+
+# Async trait support
+async-trait = "0.1"
+
+# IP address utilities
+ipnetwork = "0.20"
 
 [[bin]]
 name = "mesh-tunnel"
@@ -70,4 +95,9 @@ name = "mesh-relay"
 path = "src/bin/mesh-relay.rs"
 
 [[bin]]
-na
+name = "mesh-stun"
+path = "src/bin/mesh-stun.rs"
+
+[[bin]]
+name = "mesh-overlay"
+path = "src/bin/mesh-overlay.rs"

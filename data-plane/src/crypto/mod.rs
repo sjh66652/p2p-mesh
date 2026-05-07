@@ -7,6 +7,11 @@
 //! Key exchange is performed out-of-band through the control plane's
 //! signaling service (WebSocket). This module handles symmetric
 //! encryption once keys are established.
+//!
+//! Also includes Noise Protocol Framework (IK pattern) for
+//! WireGuard-like fast path encryption (Phase 4).
+
+pub mod noise;
 
 use chacha20poly1305::{
     aead::{Aead, KeyInit, OsRng},

@@ -218,4 +218,9 @@ services:
 volumes:
   postgres_data:
   redis_data:
-  prom
+  prometheus_data:
+  grafana_data:
+
+networks:
+  mesh-net:
+    driver: bridge

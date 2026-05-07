@@ -73,4 +73,13 @@ spec:
           readinessProbe:
             exec:
               command: ["pg_isready", "-U", "mesh", "-d", "p2p_mesh"]
-            initialDelayS
+            initialDelaySeconds: 10
+            periodSeconds: 10
+  volumeClaimTemplates:
+    - metadata:
+        name: postgres-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 20Gi

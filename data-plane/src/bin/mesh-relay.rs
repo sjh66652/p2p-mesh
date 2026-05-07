@@ -137,4 +137,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 Err(e) => log::error!("Heartbeat failed: {}", e),
             }
-      
+        }
+    });
+
+    tokio::select! {
+        _ = relay_task => log::error!("Relay loop exited unexpectedly"),
+        _ = heartbeat_task => log::error!("Heartbeat loop exited unexpectedly"),
+    }
+
+    Ok(())
+}
+
+fn get_local_ip() -> Option<String> {
+    use std::net::UdpSocket;
+    let socket = UdpSocket::bind("0.0.0.0:0").ok()?;
+    socket.connect("8.8.8.8:80").ok()?;
+    socket.local_addr().ok().map(|addr| addr.ip().to_string())
+}

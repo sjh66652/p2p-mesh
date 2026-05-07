@@ -135,4 +135,19 @@ async fn report_traffic(
     });
 
     match client
-        .post(for
+        .post(format!("{}/api/v1/traffic/report", api_url))
+        .header("Authorization", format!("Bearer {}", token))
+        .json(&payload)
+        .send()
+        .await
+    {
+        Ok(resp) => {
+            if resp.status().is_success() {
+                log::debug!("Traffic reported: {} bytes", total_bytes);
+            } else {
+                log::warn!("Traffic report failed: {}", resp.status());
+            }
+        }
+        Err(e) => log::error!("Traffic report error: {}", e),
+    }
+}

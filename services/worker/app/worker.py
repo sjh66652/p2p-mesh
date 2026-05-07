@@ -186,4 +186,27 @@ class TaskWorker:
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                log.erro
+                log.error("Cleanup task error: %s", e)
+
+
+async def main():
+    worker = TaskWorker()
+
+    # Handle graceful shutdown
+    loop = asyncio.get_event_loop()
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        try:
+            loop.add_signal_handler(sig, lambda: asyncio.create_task(worker.stop()))
+        except NotImplementedError:
+            # Windows doesn't support add_signal_handler
+            pass
+
+    await worker.start()
+
+    # Keep running until stopped
+    while worker._running:
+        await asyncio.sleep(1)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

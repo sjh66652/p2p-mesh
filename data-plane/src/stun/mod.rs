@@ -138,4 +138,16 @@ pub async fn run_stun_server(bind_addr: &str) -> Result<(), std::io::Error> {
         if msg.trim() == "ping" {
             // SECURITY (reflection/amplification): This STUN server responds
             // to any "ping" with the sender's IP:port. An attacker could spoof
-            // a victim's IP as the source to trick thi
+            // a victim's IP as the source to trick this server into sending a
+            // response to the victim (reflection). The response is small (linearly
+            // proportional to request size), so amplification is minimal (< 2x).
+            // RATE LIMIT NOTE: In production, add per-IP rate limiting here
+            // (e.g., max 10 requests/second per source IP) to further mitigate
+            // abuse. Consider adding a connection tracking table with IP-based
+            // rate limits.
+            let response = format!("{}:{}", src.ip(), src.port());
+            socket.send_to(response.as_bytes(), src).await?;
+            log::debug!("STUN response to {}: {}", src, response);
+        }
+    }
+}
