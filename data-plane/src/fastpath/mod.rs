@@ -155,7 +155,7 @@ impl BufferPool {
 }
 
 /// Fast path performance metrics.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct FastPathMetrics {
     /// Packets processed per second
     pub pps: u64,
@@ -173,6 +173,21 @@ pub struct FastPathMetrics {
     pub total_bytes: u64,
     /// Last measurement timestamp
     pub last_measurement: Instant,
+}
+
+impl Default for FastPathMetrics {
+    fn default() -> Self {
+        Self {
+            pps: 0,
+            bps: 0,
+            encrypt_latency_us: 0,
+            decrypt_latency_us: 0,
+            packets_dropped: 0,
+            total_packets: 0,
+            total_bytes: 0,
+            last_measurement: Instant::now(),
+        }
+    }
 }
 
 /// Fast path engine — orchestrates high-performance packet processing.

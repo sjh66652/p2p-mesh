@@ -14,11 +14,10 @@ use std::io::{self, Read, Write};
 
 use tokio::io::unix::AsyncFd;
 
+/// Re-import the Device trait so methods like `.name()` are available.
+use tun::Device as _;
+
 /// Platform-specific TUN device type.
-/// On Linux, this is the posix Device implementation.
-#[cfg(target_os = "linux")]
-use tun::platform::posix::Device as TunDevice;
-#[cfg(not(target_os = "linux"))]
 use tun::platform::Device as TunDevice;
 
 /// Represents a TUN virtual network interface.

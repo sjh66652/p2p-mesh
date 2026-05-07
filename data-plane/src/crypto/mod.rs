@@ -19,7 +19,7 @@ use chacha20poly1305::{
 };
 use rand::RngCore;
 use sha2::{Digest, Sha256};
-use x25519_dalek::{EphemeralSecret, PublicKey, StaticSecret};
+use x25519_dalek::{EphemeralSecret, PublicKey, ReusableSecret};
 use zeroize::Zeroize;
 
 /// A symmetric session key for data plane encryption.
@@ -76,7 +76,7 @@ pub struct EcdhKeypair {
 impl EcdhKeypair {
     /// Generate a new ephemeral X25519 keypair.
     pub fn generate() -> Self {
-        let secret = EphemeralSecret::new(rand::thread_rng());
+        let secret = EphemeralSecret::random_from_rng(rand::thread_rng());
         let public = PublicKey::from(&secret);
         Self { secret, public }
     }

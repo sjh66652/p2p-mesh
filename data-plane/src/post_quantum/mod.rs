@@ -165,7 +165,7 @@ impl PqcAlgorithm {
 // =====================================================================
 
 /// ML-KEM parameter set.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum KyberVariant {
     Kyber512,
     Kyber768,
@@ -317,7 +317,7 @@ pub fn kyber_decapsulate(sk: &KyberSecretKey, ct: &KyberCiphertext) -> KyberShar
 // =====================================================================
 
 /// ML-DSA parameter set.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DilithiumVariant {
     Dilithium44,
     Dilithium65,

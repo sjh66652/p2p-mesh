@@ -26,6 +26,8 @@ use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 
+fn instant_now() -> Instant { Instant::now() }
+
 // =====================================================================
 // Raft Consensus (using patterns from openraft / etcd)
 // =====================================================================
@@ -218,6 +220,7 @@ const K: usize = 20; // Kademlia replication parameter
 pub struct KademliaPeer {
     pub node_id: KademliaId,
     pub addr: SocketAddr,
+    #[serde(skip, default = "instant_now")]
     pub last_seen: Instant,
 }
 
