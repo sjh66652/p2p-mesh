@@ -51,7 +51,7 @@ def create_access_token(user_id: uuid.UUID, role: str = "user") -> dict:
 
     return {
         "access_token": token,
-        "token_type": "bearer",
+        "token_type": "bearer",  # nosec B105  # OAuth2 token type, not a credential
         "expires_in": settings.JWT_ACCESS_EXPIRE_MINUTES * 60,
     }
 

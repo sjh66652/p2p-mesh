@@ -50,9 +50,9 @@ async def find_path(
 
     result = await choose_path(
         db,
-        device_a_ip=dev_a.last_ip or "0.0.0.0",
+        device_a_ip=dev_a.last_ip or "0.0.0.0",  # nosec B104  # fallback when device IP unknown
         device_a_nat=dev_a.nat_type,
-        device_b_ip=dev_b.last_ip or "0.0.0.0",
+        device_b_ip=dev_b.last_ip or "0.0.0.0",  # nosec B104  # fallback when device IP unknown
         device_b_nat=dev_b.nat_type,
     )
 

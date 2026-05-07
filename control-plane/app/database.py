@@ -72,5 +72,6 @@ async def get_redis() -> aioredis.Redis:
     """FastAPI dependency: yields Redis client."""
     if redis_client is None:
         await init_redis()
-    assert redis_client is not None, "Redis client not initialized"
+    if redis_client is None:
+        raise RuntimeError("Redis client not initialized - call init_redis() first")
     return redis_client

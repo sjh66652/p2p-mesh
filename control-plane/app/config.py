@@ -49,7 +49,7 @@ class Settings:
     JWT_REFRESH_EXPIRE_DAYS: int = int(os.getenv("JWT_REFRESH_EXPIRE_DAYS", "7"))
 
     # ---- Server ----
-    HOST: str = "0.0.0.0"
+    HOST: str = "0.0.0.0"  # nosec B104  # standard Docker/server bind address
     PORT: int = int(os.getenv("PORT", "8000"))
     DEBUG: bool = os.getenv("DEBUG", "false").lower() == "true"
     MAX_REQUEST_BODY_BYTES: int = int(os.getenv("MAX_REQUEST_BODY_BYTES", str(1 * 1024 * 1024)))  # 1MB default
