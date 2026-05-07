@@ -35,8 +35,10 @@ fn instant_now() -> Instant { Instant::now() }
 // =====================================================================
 
 /// Relay tier classification.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 pub enum RelayTier {
+    #[default]
+    Edge,
     /// End-user facing, lowest latency, many instances
     Edge,
     /// Regional aggregation, medium latency
@@ -80,7 +82,7 @@ impl RelayTier {
 }
 
 /// Geographic coordinates for relay placement.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
 pub struct GeoLocation {
     pub latitude: f64,
     pub longitude: f64,
@@ -119,7 +121,7 @@ impl GeoLocation {
 // =====================================================================
 
 /// A single relay node in the smart relay network.
-#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SmartRelayNode {
     /// Unique relay identifier
     pub id: String,
@@ -150,8 +152,28 @@ pub struct SmartRelayNode {
     pub tags: HashMap<String, String>,
 }
 
+impl Default for SmartRelayNode {
+    fn default() -> Self {
+        Self {
+            id: String::new(),
+            tier: RelayTier::default(),
+            addr: "0.0.0.0:0".parse().unwrap(),
+            location: GeoLocation::default(),
+            capacity: RelayCapacity::default(),
+            load: RelayLoad::default(),
+            health_score: 0.0,
+            peers: HashSet::new(),
+            upstream: None,
+            downstream: Vec::new(),
+            last_seen: Instant::now(),
+            uptime_pct: 100.0,
+            tags: HashMap::new(),
+        }
+    }
+}
+
 /// Relay capacity specifications.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct RelayCapacity {
     /// Maximum bandwidth (bps)
     pub max_bandwidth_bps: u64,

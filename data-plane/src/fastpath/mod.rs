@@ -249,7 +249,7 @@ impl FastPath {
     /// This is the hot path — every microsecond matters.
     pub async fn process_batch(&self) -> usize {
         let mut rx = self.rx.lock().await;
-        let processed = 0;
+        let mut processed = 0;
         let _ = processed;
         let batch_size = self.config.encrypt_batch_size;
 
