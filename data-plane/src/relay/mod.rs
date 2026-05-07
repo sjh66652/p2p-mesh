@@ -11,7 +11,7 @@
 //! - Per-device rate limiting prevents traffic amplification attacks
 
 use std::collections::HashMap;
-use std::net::{IpAddr, SocketAddr};
+use std::net::SocketAddr;
 use std::sync::Arc;
 
 use sha2::Sha256;
@@ -39,7 +39,8 @@ pub struct ForwardingTable {
     /// device_id -> packets in current second (rate limiting)
     rate_limits: RwLock<HashMap<String, (u64, u64)>>, // (window_start, count)
     /// IP address -> packets in current second (secondary rate limiting)
-    ip_rate_limits: RwLock<HashMap<IpAddr, (u64, u64)>>, // (window_start, count)
+    /// Prevents a single IP from rotating through many device IDs.
+    ip_rate_limits: RwLock<HashMap<String, (u64, u64)>>, // (window_start, count)
     /// Shared HMAC key for source authentication
     hmac_key: Vec<u8>,
 }
@@ -53,8 +54,7 @@ impl ForwardingTable {
             rate_limits: RwLock::new(HashMap::new()),
             ip_rate_limits: RwLock::new(HashMap::new()),
             hmac_key: std::env::var("RELAY_HMAC_KEY")
-                .expect("RELAY_HMAC_KEY environment variable must be set for production. \
-                         Generate with: openssl rand -hex 32")
+                .expect("RELAY_HMAC_KEY environment variable must be set.                          Generate with: openssl rand -hex 32")
                 .into_bytes(),
         }
     }
@@ -161,27 +161,26 @@ impl ForwardingTable {
         true
     }
 
-    /// Per-IP rate limiting — max `limit` packets per second.
-    /// Acts as a secondary layer to catch cases where a single IP
-    /// spoofs multiple device IDs.
-    async fn check_ip_rate_limit(&self, ip: IpAddr, limit: u64) -> bool {
+    /// Secondary IP-based rate limiting — max `limit` packets per second per IP.
+    /// Prevents spoofing attacks where a single IP rotates through many device IDs.
+    pub async fn check_ip_rate_limit(&self, ip: std::net::IpAddr, limit: u64) -> bool {
         let mut rates = self.ip_rate_limits.write().await;
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs();
 
-        let entry = rates.entry(ip).or_insert((now, 0));
+        let ip_str = ip.to_string();
+        let entry = rates.entry(ip_str).or_insert((now, 0));
 
         if entry.0 != now {
-            // New second — reset counter
             entry.0 = now;
             entry.1 = 0;
         }
 
         entry.1 += 1;
         if entry.1 > limit {
-            return false; // rate limit exceeded
+            return false;
         }
         true
     }
@@ -207,7 +206,7 @@ pub async fn relay_loop(
 ) {
     let mut buf = vec![0u8; 65536]; // Max UDP packet size
     const MAX_PACKETS_PER_SEC: u64 = 100; // Per-device rate limit
-    const MAX_IP_PACKETS_PER_SEC: u64 = 500; // Per-IP rate limit
+    const MAX_IP_PACKETS_PER_SEC: u64 = 500; // Per-IP secondary rate limit
 
     log::info!("Relay forwarding loop started (HMAC verification enabled)");
 
@@ -254,6 +253,43 @@ pub async fn relay_loop(
 
                 // Secondary IP-based rate limit — prevents spoofing attacks
                 // where a single IP rotates through many device IDs
-                let src_ip = src_addr.ip();
-                if !forwarding_table.check_ip_rate_limit(src_ip, MAX_IP_PACKETS_PER_SEC).await {
-                    log::warn!("IP rate limit exc
+                if !forwarding_table.check_ip_rate_limit(src_addr.ip(), MAX_IP_PACKETS_PER_SEC).await {
+                    log::warn!("IP rate limit exceeded for {}", src_addr.ip());
+                    continue;
+                }
+
+                // Update device address (only after HMAC passes)
+                forwarding_table.register_device(&src_id, src_addr).await;
+
+                // Look up the destination route
+                if let Some(dst_addr) = forwarding_table.lookup(&src_id, &dst_id).await {
+                    match socket.send_to(payload, dst_addr).await {
+                        Ok(sent) => {
+                            forwarding_table
+                                .record_forward(&src_id, sent as u64)
+                                .await;
+                            log::trace!(
+                                "Forwarded {} bytes: {} -> {}",
+                                sent, src_id, dst_id
+                            );
+                        }
+                        Err(e) => {
+                            log::error!("Forward failed from {} to {}: {}", src_id, dst_id, e);
+                        }
+                    }
+                } else {
+                    // No pre-established route — do NOT auto-create one.
+                    // Routes are established by the control plane's signaling.
+                    log::debug!(
+                        "No established route for {} -> {} (packet from {})",
+                        src_id, dst_id, src_addr
+                    );
+                }
+            }
+            Err(e) => {
+                log::error!("Receive error in relay loop: {}", e);
+                break;
+            }
+        }
+    }
+}

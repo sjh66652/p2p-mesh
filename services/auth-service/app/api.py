@@ -151,4 +151,30 @@ async def get_profile(user=Depends(get_current_user)):
     return user
 
 
-@router.patch("/me", response_model
+@router.patch("/me", response_model=UserResponse)
+async def update_profile(
+    data: UserUpdate,
+    user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Update user profile. Only whitelisted fields can be modified."""
+    try:
+        updated = await auth_service.update_user(
+            db, user, data.model_dump(exclude_unset=True)
+        )
+        return updated
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+
+@router.post("/change-password", status_code=status.HTTP_204_NO_CONTENT)
+async def change_password(
+    data: PasswordChange,
+    user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Change password (requires current password)."""
+    try:
+        await auth_service.change_password(db, user, data.old_password, data.new_password)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))

@@ -38,4 +38,5 @@ def setup_tracing(service_name: str):
     except ImportError:
         import logging
         logging.getLogger("opentelemetry").warning(
-            "OpenTelemetry packages not installed. Install with: pip install
+            "OpenTelemetry packages not installed. Install with: pip install opentelemetry-api opentelemetry-sdk opentelemetry-exporter-otlp opentelemetry-instrumentation-fastapi"
+        )

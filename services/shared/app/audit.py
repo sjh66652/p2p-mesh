@@ -63,4 +63,4 @@ async def audit_log(
         r = await _get_redis(redis_url)
         await r.rpush(AUDIT_QUEUE, json.dumps(event))
     except Exception as e:
-        logger.warning("Failed to queue 
+        logger.warning("Failed to queue audit event: %s", e)

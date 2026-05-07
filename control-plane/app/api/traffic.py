@@ -127,4 +127,4 @@ async def get_traffic_summary(
 ):
     """Get traffic usage summary for the current user."""
     start = datetime.fromisoformat(period_start) if period_start else None
-    end = datetime.fromisoformat(period_end) if period_end
+    end = datetime.fromisoformat(period_end) if period_end else None

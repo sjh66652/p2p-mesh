@@ -184,4 +184,4 @@ async def metrics(request: Request):
 
     client_ip = request.client.host if request.client else ""
     if not (client_ip.startswith("172.") or client_ip.startswith("10.") or client_ip == "127.0.0.1"):
-        return Response(status_code=403, c
+        return Response(status_code=403, content="Forbidden")

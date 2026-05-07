@@ -233,4 +233,5 @@ async def health_check():
     return {
         "status": "healthy",
         "db": app.state.db_ok,
- 
+        "redis": app.state.redis_ok,
+    }

@@ -270,4 +270,4 @@ async def metrics(request: Request):
         return Response(status_code=403, content="Forbidden")
 
     from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
-    return Response(content=generate_
+    return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)

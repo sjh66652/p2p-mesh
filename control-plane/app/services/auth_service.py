@@ -246,4 +246,6 @@ async def update_user(db: AsyncSession, user: User, data: dict) -> User:
     for key, value in data.items():
         if value is not None and key in ALLOWED_UPDATE_FIELDS and hasattr(user, key):
             setattr(user, key, value)
-    await db.
+    await db.flush()
+    await db.refresh(user)
+    return user
