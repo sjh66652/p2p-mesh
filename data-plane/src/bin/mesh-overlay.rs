@@ -15,10 +15,8 @@
 //! - Multi-path transport (direct, relay)
 //! - Encrypted data plane (ChaCha20-Poly1305)
 
-use std::net::{Ipv4Addr, SocketAddr};
+use std::net::SocketAddr;
 use std::sync::Arc;
-use std::time::Duration;
-
 use clap::Parser;
 
 use p2p_mesh_dataplane::{
@@ -29,9 +27,7 @@ use p2p_mesh_dataplane::{
     acl::{AclEngine, AclPolicy},
     dns::MeshDns,
     ice::IceAgent,
-    turn::TurnServer,
     tunnel::TunnelManager,
-    crypto::SessionKey,
 };
 
 #[derive(Parser, Debug)]
