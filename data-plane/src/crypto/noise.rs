@@ -350,8 +350,9 @@ impl NoiseIKHandshake {
         let ee_shared = resp_ephemeral_secret.diffie_hellman(&init_ephemeral);
         mix_key(&mut self.chaining_key, ee_shared.as_bytes());
 
-        // se: DH(our_static, initiator_ephemeral) — forward secrecy component
-        let se_shared = self.static_keypair.secret.diffie_hellman(&init_ephemeral);
+        // se: DH(initiator_static, responder_ephemeral) — forward secrecy
+        let init_static = PublicKey::from(self.peer_static_public);
+        let se_shared = resp_ephemeral_secret.diffie_hellman(&init_static);
         mix_key(&mut self.chaining_key, se_shared.as_bytes());
 
         self.state = HandshakeState::Established;

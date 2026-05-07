@@ -35,7 +35,7 @@ use tokio::sync::RwLock;
 
 /// Policy enforcement mode.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "kebab-case")]
 pub enum PolicyMode {
     /// Allow all traffic by default, deny only what rules specify
     DefaultAllow,
@@ -68,7 +68,7 @@ pub struct AclRule {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "kebab-case")]
 pub enum AclAction {
     Allow,
     Deny,
