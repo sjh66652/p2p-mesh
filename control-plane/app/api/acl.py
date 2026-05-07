@@ -140,7 +140,7 @@ async def _load_policy_from_db(db: AsyncSession):
         row = result.scalar_one_or_none()
         if row is not None:
             _current_policy = AclPolicy.model_validate(row.policy_json)
-            _current_version = row.version
+            _current_version = int(row.version)
             log.info(
                 "ACL: Loaded policy from database (version=%d, mode=%s)",
                 _current_version, _current_policy.mode,

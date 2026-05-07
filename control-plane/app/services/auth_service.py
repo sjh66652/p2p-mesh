@@ -120,7 +120,7 @@ async def register_user(db: AsyncSession, data: UserRegister) -> User:
 # -- Login with brute-force protection --
 
 async def login_user(
-    db: AsyncSession, data: UserLogin, redis_client=None, device_id: str = None
+    db: AsyncSession, data: UserLogin, redis_client=None, device_id: str | None = None
 ) -> dict:
     """
     Authenticate a user. Enforces brute-force lockout via Redis.

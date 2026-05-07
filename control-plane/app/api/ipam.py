@@ -179,8 +179,8 @@ async def allocate_ip(
         )
 
     # Allocate new IP
-    ip = _get_next_available_ip()
-    if ip is None:
+    new_ip = _get_next_available_ip()
+    if new_ip is None:
         log.error("IPAM: No available IPs in overlay range")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -188,8 +188,8 @@ async def allocate_ip(
         )
 
     now = datetime.now(timezone.utc).isoformat()
-    _assigned_ips[device_id] = (ip, now)
-    _ip_to_device[ip] = device_id
+    _assigned_ips[device_id] = (new_ip, now)
+    _ip_to_device[new_ip] = device_id
 
     # Persist to PostgreSQL
     try:
@@ -200,17 +200,17 @@ async def allocate_ip(
             ON CONFLICT (device_id) DO UPDATE SET virtual_ip = EXCLUDED.virtual_ip
         """), {
             "device_id": device_id,
-            "virtual_ip": ip,
+            "virtual_ip": new_ip,
         })
         await db.commit()
     except Exception as e:
         log.warning("IPAM: Failed to persist IP to PostgreSQL (non-fatal): %s", e)
         await db.rollback()
 
-    log.info("IPAM: Allocated %s to device %s", ip, device_id)
+    log.info("IPAM: Allocated %s to device %s", new_ip, device_id)
     return AllocateResponse(
         device_id=device_id,
-        virtual_ip=ip,
+        virtual_ip=new_ip,
         assigned_at=now,
     )
 

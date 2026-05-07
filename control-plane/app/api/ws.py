@@ -14,6 +14,7 @@ import os
 import time
 import uuid
 import logging
+from typing import Any
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from jose import jwt, JWTError
@@ -210,7 +211,7 @@ async def handle_signal(
     ws: WebSocket,
     device_id: uuid.UUID,
     user_id: uuid.UUID,
-    msg: dict[str, object],
+    msg: dict[str, Any],
 ) -> None:
     """Process an incoming signaling message with validation."""
     msg_type = msg.get("type", "")
