@@ -12,17 +12,15 @@ Endpoints:
 """
 
 import ipaddress
-from uuid import UUID, uuid4
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select, text
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel, Field
 
 from app.database import get_db
-from app.dependencies import get_current_user_id, get_current_user
-from app.models.user import User
+from app.dependencies import get_current_user
 
 import logging
 log = logging.getLogger("p2p-mesh.ipam")
