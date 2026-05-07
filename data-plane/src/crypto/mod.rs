@@ -14,7 +14,7 @@
 pub mod noise;
 
 use chacha20poly1305::{
-    aead::{Aead, KeyInit, OsRng},
+    aead::{Aead, KeyInit},
     ChaCha20Poly1305, Key, Nonce,
 };
 use rand::RngCore;
@@ -34,7 +34,7 @@ impl SessionKey {
     /// Generate a new random session key using OS randomness.
     pub fn generate() -> Self {
         let mut key = [0u8; 32];
-        OsRng.fill_bytes(&mut key);
+        rand::thread_rng().fill_bytes(&mut key);
         Self { key }
     }
 
@@ -76,7 +76,7 @@ pub struct EcdhKeypair {
 impl EcdhKeypair {
     /// Generate a new ephemeral X25519 keypair.
     pub fn generate() -> Self {
-        let secret = EphemeralSecret::random_from_rng(OsRng);
+        let secret = EphemeralSecret::random_from_rng(rand::thread_rng());
         let public = PublicKey::from(&secret);
         Self { secret, public }
     }
@@ -97,24 +97,25 @@ impl EcdhKeypair {
 
 /// Encrypt a plaintext payload using ChaCha20-Poly1305.
 ///
-/// Returns the ciphertext prefixed with the 12-byte nonce.
+/// Returns the ciphertext prefixed with the 12-byte nonce, or an error
+/// if encryption fails (e.g., plaintext exceeds AEAD limits).
 /// Format: [nonce (12 bytes)][ciphertext + tag]
-pub fn encrypt(key: &SessionKey, plaintext: &[u8]) -> Vec<u8> {
+pub fn encrypt(key: &SessionKey, plaintext: &[u8]) -> Result<Vec<u8>, &'static str> {
     let cipher = ChaCha20Poly1305::new(Key::from_slice(&key.key));
 
     let mut nonce_bytes = [0u8; 12];
-    OsRng.fill_bytes(&mut nonce_bytes);
+    rand::thread_rng().fill_bytes(&mut nonce_bytes);
     let nonce = Nonce::from_slice(&nonce_bytes);
 
     let ciphertext = cipher
         .encrypt(nonce, plaintext)
-        .expect("Encryption failed");
+        .map_err(|_| "ChaCha20Poly1305 encryption failed")?;
 
     // Prepend nonce for the recipient
     let mut result = Vec::with_capacity(12 + ciphertext.len());
     result.extend_from_slice(&nonce_bytes);
     result.extend_from_slice(&ciphertext);
-    result
+    Ok(result)
 }
 
 /// Decrypt a ChaCha20-Poly1305 ciphertext (nonce-prefixed format).
@@ -159,7 +160,7 @@ mod tests {
         let key = SessionKey::generate();
         let plaintext = b"Hello, P2P Mesh Network!";
 
-        let encrypted = encrypt(&key, plaintext);
+        let encrypted = encrypt(&key, plaintext).expect("encrypt failed");
         assert_ne!(encrypted, plaintext);
 
         let decrypted = decrypt(&key, &encrypted).expect("Decryption failed");
@@ -170,7 +171,7 @@ mod tests {
     fn test_tampered_data_fails() {
         let key = SessionKey::generate();
         let plaintext = b"Sensitive data";
-        let mut encrypted = encrypt(&key, plaintext);
+        let mut encrypted = encrypt(&key, plaintext).expect("encrypt failed");
 
         // Tamper with the ciphertext
         if encrypted.len() > 13 {

@@ -21,6 +21,12 @@ use serde::{Deserialize, Serialize};
 use tokio::net::UdpSocket;
 use tokio::sync::RwLock;
 
+/// Default timeout for upstream DNS queries (5 seconds).
+const DEFAULT_DNS_TIMEOUT_SECS: u64 = 5;
+
+/// Environment variable to override the upstream DNS query timeout.
+const ENV_DNS_TIMEOUT: &str = "DNS_UPSTREAM_TIMEOUT_SECS";
+
 /// DNS record for the mesh network.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DnsRecord {
@@ -51,11 +57,26 @@ pub struct MeshDns {
     cache: RwLock<HashMap<String, CacheEntry>>,
     /// Upstream DNS servers for non-mesh domains
     upstream: RwLock<Vec<SocketAddr>>,
+    /// Timeout for upstream DNS queries (default: 5s, overridable via DNS_UPSTREAM_TIMEOUT_SECS)
+    upstream_timeout: Duration,
 }
 
 impl MeshDns {
     /// Create a new mesh DNS resolver with default upstream servers.
     pub fn new() -> Self {
+        let timeout_secs = std::env::var(ENV_DNS_TIMEOUT)
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+            .unwrap_or(DEFAULT_DNS_TIMEOUT_SECS);
+        let upstream_timeout = Duration::from_secs(timeout_secs);
+
+        log::debug!(
+            "DNS upstream timeout set to {}s (from env {}={})",
+            upstream_timeout.as_secs(),
+            ENV_DNS_TIMEOUT,
+            std::env::var(ENV_DNS_TIMEOUT).unwrap_or_else(|_| "default".to_string()),
+        );
+
         Self {
             records: RwLock::new(HashMap::new()),
             cache: RwLock::new(HashMap::new()),
@@ -63,6 +84,7 @@ impl MeshDns {
                 "8.8.8.8:53".parse().unwrap(),       // Google DNS
                 "1.1.1.1:53".parse().unwrap(),       // Cloudflare DNS
             ]),
+            upstream_timeout,
         }
     }
 
@@ -181,12 +203,14 @@ impl MeshDns {
         // Build a simple DNS query
         let query = build_dns_query(hostname);
 
-        socket.send_to(&query, server).await
+        tokio::time::timeout(self.upstream_timeout, socket.send_to(&query, server))
+            .await
+            .map_err(|_| format!("DNS send timeout to {}", server))?
             .map_err(|e| format!("DNS send failed: {}", e))?;
 
         let mut buf = [0u8; 512];
         let (n, _) = tokio::time::timeout(
-            Duration::from_secs(3),
+            self.upstream_timeout,
             socket.recv_from(&mut buf),
         )
         .await

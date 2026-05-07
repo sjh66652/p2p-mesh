@@ -1,0 +1,140 @@
+# P2P Mesh Network - Kubernetes Network Policies
+#
+# TEMPLATE: Customize per environment before applying.
+# These policies implement a default-deny model for the p2p-mesh namespace.
+# Without these, all pods can communicate freely (Kubernetes default).
+#
+# Apply with: kubectl apply -f network-policies.yaml
+#
+# NOTE:
+# - The ingress controller (nginx) typically runs in a different namespace.
+#   Adjust the ingress policy namespaceSelector/ipBlock as needed.
+# - If using hostNetwork (relay DaemonSet), NetworkPolicy may not apply to
+#   those pods depending on the CNI plugin.
+#
+# ---
+# Default deny all ingress traffic in the p2p-mesh namespace.
+# Any pod not explicitly allowed below will be isolated.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: p2p-mesh
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+---
+# Allow ingress from the ingress controller to all microservices on port 8000.
+# Adjust the namespaceSelector to match where your ingress controller runs.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ingress-controller
+  namespace: p2p-mesh
+spec:
+  podSelector:
+    matchLabels:
+      component: microservice
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+      ports:
+        - port: 8000
+          protocol: TCP
+---
+# Allow inter-service communication between microservices on port 8000.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-microservice-internal
+  namespace: p2p-mesh
+spec:
+  podSelector:
+    matchLabels:
+      component: microservice
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              component: microservice
+      ports:
+        - port: 8000
+          protocol: TCP
+---
+# Allow microservices and the control-plane API to access PostgreSQL on port 5432.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-postgres-access
+  namespace: p2p-mesh
+spec:
+  podSelector:
+    matchLabels:
+      app: postgres
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              component: microservice
+        - podSelector:
+            matchLabels:
+              app: mesh-api
+      ports:
+        - port: 5432
+          protocol: TCP
+---
+# Allow microservices and the control-plane API to access Redis on port 6379.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-redis-access
+  namespace: p2p-mesh
+spec:
+  podSelector:
+    matchLabels:
+      app: redis
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              component: microservice
+        - podSelector:
+            matchLabels:
+              app: mesh-api
+      ports:
+        - port: 6379
+          protocol: TCP
+---
+# Allow relay DaemonSet pods to reach the control-plane API on port 8000.
+# Relay pods use hostNetwork=true which may bypass NetworkPolicy — verify
+# with your CNI plugin documentation.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-relay-to-api
+  namespace: p2p-mesh
+spec:
+  podSelector:
+    matchLabels:
+      app: mesh-api
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              component: data-plane
+      ports:
+        - port: 8000
+          protocol: TCP

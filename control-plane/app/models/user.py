@@ -42,6 +42,9 @@ class User(Base):
         SAEnum(UserRole), default=UserRole.USER, nullable=False
     )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    password_updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, default=None,
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),

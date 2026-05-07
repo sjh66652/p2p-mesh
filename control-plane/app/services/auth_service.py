@@ -245,3 +245,44 @@ async def update_user(db: AsyncSession, user: User, data: dict) -> User:
     await db.flush()
     await db.refresh(user)
     return user
+
+
+async def change_password(
+    db: AsyncSession, user: User, old_password: str, new_password: str,
+):
+    """
+    Change password with strength validation and old-password verification.
+    Sets password_updated_at so all existing JWTs are invalidated on next request.
+    """
+    _validate_password_strength(new_password)
+
+    if not verify_password(old_password, user.password_hash):
+        raise ValueError("Current password is incorrect")
+
+    user.password_hash = hash_password(new_password)
+    user.password_updated_at = datetime.now(timezone.utc)
+    await db.flush()
+
+
+async def logout_user(redis_client, token: str):
+    """
+    Blacklist a JWT access token and revoke the user's refresh token.
+    """
+    try:
+        payload = jwt.decode(
+            token, settings.JWT_SECRET,
+            algorithms=[settings.JWT_ALGORITHM],
+            options={"verify_exp": False},
+        )
+        jti = payload.get("jti", "")
+        user_id = payload.get("sub", "")
+        exp = payload.get("exp", 0)
+        now = datetime.now(timezone.utc).timestamp()
+        ttl = max(int(exp - now), 1)
+
+        if jti:
+            await redis_client.setex(f"jwt_blacklist:{jti}", ttl, "1")
+        if user_id:
+            await redis_client.delete(f"refresh_token:{user_id}")
+    except JWTError:
+        pass

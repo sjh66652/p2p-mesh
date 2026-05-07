@@ -139,3 +139,7 @@ async def get_traffic_summary(
     """Get traffic usage summary for the current user."""
     start = datetime.fromisoformat(period_start) if period_start else None
     end = datetime.fromisoformat(period_end) if period_end else None
+    result = await billing_service.get_user_traffic_summary(
+        db, user_id=user.id, period_start=start, period_end=end,
+    )
+    return result

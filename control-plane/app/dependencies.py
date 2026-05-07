@@ -90,6 +90,14 @@ async def get_current_user(
     if user is None or not user.is_active:
         raise credentials_exception
 
+    # Invalidate tokens issued before the user's last password change.
+    # This ensures that changing passwords logs out all other sessions.
+    token_iat = payload.get("iat")
+    if token_iat is not None and user.password_updated_at is not None:
+        # Compare as timestamps: if token was issued before the password change, reject it
+        if token_iat < user.password_updated_at.timestamp():
+            raise credentials_exception
+
     return user
 
 

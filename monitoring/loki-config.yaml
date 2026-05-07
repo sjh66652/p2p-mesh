@@ -1,5 +1,14 @@
 auth_enabled: false
 
+# SECURITY: Authentication is currently disabled (auth_enabled: false).
+# In production, you MUST enable authentication to prevent unauthorized
+# access to log data. Options:
+#   1. Set auth_enabled: true and configure Loki's multi-tenant auth
+#      (requires X-Scope-OrgID header from a reverse proxy).
+#   2. Deploy an authenticating reverse proxy (nginx, oauth2-proxy, etc.)
+#      in front of Loki's HTTP/gRPC ports.
+#   3. For HTTP basic auth, configure a reverse proxy with auth_request.
+
 server:
   http_listen_port: 3100
   grpc_listen_port: 9096

@@ -10,9 +10,8 @@ These support the Phase 1 overlay network features:
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, String, DateTime, ForeignKey, Integer, JSON, Text, UniqueConstraint
+from sqlalchemy import Column, String, DateTime, Integer, JSON, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID, INET
-from sqlalchemy.orm import relationship
 
 from app.database import Base
 

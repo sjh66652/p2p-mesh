@@ -5,11 +5,14 @@ Token creation, decoding, and verification for service-to-service auth.
 
 import uuid
 import secrets
+import logging
 from datetime import datetime, timedelta, timezone
 
-from jose import jwt, JWTError
+from jose import jwt, JWTError, ExpiredSignatureError
 
 from shared.app.config import BaseConfig
+
+logger = logging.getLogger("jwt_utils")
 
 
 # Use a module-level settings placeholder; the calling service should
@@ -94,10 +97,15 @@ def decode_token(token: str, expected_type: str = "access", settings=None) -> di
             algorithms=[settings.JWT_ALGORITHM],
             options={"require": ["exp", "jti", "sub", "type"]},
         )
+    except ExpiredSignatureError:
+        logger.warning("Token decode failed: expired signature")
+        raise ValueError("Token has expired")
     except JWTError as e:
+        logger.warning("Token decode failed: %s", e)
         raise ValueError(f"Invalid token: {e}")
 
     if payload.get("type") != expected_type:
+        logger.warning("Token type mismatch: expected %s, got %s", expected_type, payload.get("type"))
         raise ValueError(f"Token is not a {expected_type} token")
 
     return payload
@@ -120,7 +128,11 @@ def verify_service_token(token: str, settings=None) -> dict:
             algorithms=[settings.JWT_ALGORITHM],
             options={"require": ["exp", "jti", "sub", "type"]},
         )
+    except ExpiredSignatureError:
+        logger.warning("Service token decode failed: expired signature")
+        raise ValueError("Service token has expired")
     except JWTError as e:
+        logger.warning("Service token decode failed: %s", e)
         raise ValueError(f"Invalid service token: {e}")
 
     if payload.get("type") not in ("service", "access"):

@@ -21,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel, Field
 
 from app.database import get_db
-from app.dependencies import get_current_user_id
+from app.dependencies import get_current_user_id, get_current_user
 from app.models.user import User
 
 import logging
@@ -64,13 +64,15 @@ class PeersResponse(BaseModel):
     total: int
 
 
-# In-memory IP allocation table (PostgreSQL-backed in production)
+# In-memory IP allocation table (backed by PostgreSQL virtual_ips table)
 # device_id -> (virtual_ip, assigned_at)
 _assigned_ips: dict[str, tuple[str, str]] = {}
 # virtual_ip -> device_id
 _ip_to_device: dict[str, str] = {}
 # Next available host index in OVERLAY_HOSTS
 _next_host_idx: int = 0
+# Flag to track whether DB has been loaded
+_db_loaded: bool = False
 
 
 async def _ensure_ipam_table(db: AsyncSession):
@@ -88,6 +90,46 @@ async def _ensure_ipam_table(db: AsyncSession):
     except Exception as e:
         log.debug("virtual_ips table may already exist: %s", e)
         await db.rollback()
+
+
+async def _load_from_db(db: AsyncSession):
+    """Load existing IP assignments from PostgreSQL into in-memory dicts.
+
+    Called at startup (first access) to restore state across restarts.
+    """
+    global _assigned_ips, _ip_to_device, _next_host_idx, _db_loaded
+    if _db_loaded:
+        return
+    try:
+        await _ensure_ipam_table(db)
+        result = await db.execute(text("""
+            SELECT device_id, virtual_ip, assigned_at
+            FROM virtual_ips
+            ORDER BY assigned_at ASC
+        """))
+        rows = result.fetchall()
+        loaded = 0
+        max_idx = 0
+        for row in rows:
+            dev_id = str(row[0])
+            ip = str(row[1])
+            assigned = str(row[2]) if row[2] else datetime.now(timezone.utc).isoformat()
+            _assigned_ips[dev_id] = (ip, assigned)
+            _ip_to_device[ip] = dev_id
+            # Track the highest index used so _next_host_idx resumes past it
+            try:
+                idx = OVERLAY_HOSTS.index(ipaddress.IPv4Address(ip))
+                if idx >= max_idx:
+                    max_idx = idx + 1
+            except ValueError:
+                pass
+            loaded += 1
+        _next_host_idx = max_idx
+        _db_loaded = True
+        log.info("IPAM: Loaded %d assignments from database (next_idx=%d)", loaded, _next_host_idx)
+    except Exception as e:
+        log.warning("IPAM: Failed to load from database (non-fatal): %s", e)
+        _db_loaded = True  # Still mark loaded so we don't retry every request
 
 
 def _get_next_available_ip() -> str | None:
@@ -115,6 +157,7 @@ def _get_next_available_ip() -> str | None:
 )
 async def allocate_ip(
     request: AllocateRequest,
+    user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Assign a virtual IP from the 100.64.0.0/10 overlay network to a device.
@@ -123,6 +166,9 @@ async def allocate_ip(
     Otherwise, allocates the next available IP address.
     """
     device_id = request.device_id
+
+    # Ensure in-memory state is loaded from DB
+    await _load_from_db(db)
 
     # Check if device already has an IP
     if device_id in _assigned_ips:
@@ -178,6 +224,7 @@ async def allocate_ip(
 )
 async def release_ip(
     request: ReleaseRequest,
+    user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Release a device's virtual IP back to the pool.
@@ -185,6 +232,9 @@ async def release_ip(
     Called when a device gracefully shuts down or is deregistered.
     """
     device_id = request.device_id
+
+    # Ensure in-memory state is loaded from DB
+    await _load_from_db(db)
 
     if device_id in _assigned_ips:
         ip, _ = _assigned_ips.pop(device_id)
@@ -211,8 +261,15 @@ async def release_ip(
     response_model=AllocateResponse,
     summary="Get device's virtual IP",
 )
-async def get_device_ip(device_id: str):
+async def get_device_ip(
+    device_id: str,
+    user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     """Look up a device's assigned virtual IP address."""
+    # Ensure in-memory state is loaded from DB
+    await _load_from_db(db)
+
     if device_id in _assigned_ips:
         ip, assigned = _assigned_ips[device_id]
         return AllocateResponse(
@@ -232,8 +289,13 @@ async def get_device_ip(device_id: str):
     response_model=PeersResponse,
     summary="List all peer virtual IPs",
 )
-async def list_peers():
+async def list_peers(
+    user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     """Get the full mapping of device_id -> virtual_ip for all peers."""
+    # Ensure in-memory state is loaded from DB
+    await _load_from_db(db)
     peers = [
         PeerInfo(
             device_id=dev_id,

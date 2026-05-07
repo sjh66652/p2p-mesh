@@ -430,7 +430,7 @@ mod tests {
     async fn test_direct_preferred_over_relay() {
         let selector = PathSelector::new();
         selector.add_path("peer1", make_test_path("v4-relay", IpVersion::V4, PathType::Relay, 10)).await;
-        selector.add_path("peer1", make_test_path("v4-direct", IpVersion::V4, PathType::Direct, 50)).await);
+        selector.add_path("peer1", make_test_path("v4-direct", IpVersion::V4, PathType::Direct, 50)).await;
 
         let best = selector.select_best_path("peer1").await;
         assert!(best.is_some());

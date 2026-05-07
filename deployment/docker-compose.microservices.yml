@@ -260,6 +260,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 30s
     restart: unless-stopped
     networks:
       - mesh-net
@@ -284,6 +285,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 30s
     environment:
       REDISCLI_AUTH: ${REDIS_PASSWORD}
     restart: unless-stopped

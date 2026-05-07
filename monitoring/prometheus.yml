@@ -1,5 +1,11 @@
 # P2P Mesh Network - Prometheus Configuration
 # Scrapes metrics from the control plane API and export targets.
+#
+# TLS RECOMMENDATIONS:
+# - All scrape targets below use http:// scheme by default.
+# - For defense-in-depth in production, consider switching scrape targets
+#   to HTTPS where the target service supports it.
+# - See individual target comments for specific HTTPS guidance.
 
 global:
   scrape_interval: 15s
@@ -16,6 +22,7 @@ rule_files:
 
 scrape_configs:
   # Auth Service
+  # SECURITY: Consider switching to HTTPS in production (defense-in-depth)
   - job_name: "mesh-auth"
     metrics_path: /metrics
     static_configs:
@@ -26,6 +33,7 @@ scrape_configs:
           component: "microservice"
 
   # User Service
+  # SECURITY: Consider switching to HTTPS in production (defense-in-depth)
   - job_name: "mesh-user"
     metrics_path: /metrics
     static_configs:
@@ -36,6 +44,7 @@ scrape_configs:
           component: "microservice"
 
   # Signaling Service
+  # SECURITY: Consider switching to HTTPS in production (defense-in-depth)
   - job_name: "mesh-signaling"
     metrics_path: /metrics
     static_configs:
@@ -46,6 +55,7 @@ scrape_configs:
           component: "microservice"
 
   # Relay Service
+  # SECURITY: Consider switching to HTTPS in production (defense-in-depth)
   - job_name: "mesh-relay-svc"
     metrics_path: /metrics
     static_configs:
@@ -56,6 +66,7 @@ scrape_configs:
           component: "microservice"
 
   # Usage Service
+  # SECURITY: Consider switching to HTTPS in production (defense-in-depth)
   - job_name: "mesh-usage"
     metrics_path: /metrics
     static_configs:
@@ -66,6 +77,7 @@ scrape_configs:
           component: "microservice"
 
   # Node exporter (if installed on relay hosts)
+  # SECURITY: Consider switching to HTTPS in production (defense-in-depth)
   - job_name: "node"
     static_configs:
       - targets:
@@ -74,12 +86,14 @@ scrape_configs:
           service: "relay"
 
   # Prometheus self-monitoring
+  # SECURITY: Consider switching to HTTPS in production (defense-in-depth)
   - job_name: "prometheus"
     static_configs:
       - targets:
           - "localhost:9090"
 
   # Loki self-monitoring
+  # SECURITY: Consider switching to HTTPS in production (defense-in-depth)
   - job_name: "loki"
     metrics_path: /metrics
     static_configs:
@@ -89,6 +103,7 @@ scrape_configs:
           service: "loki"
 
   # Jaeger self-monitoring
+  # SECURITY: Consider switching to HTTPS in production (defense-in-depth)
   - job_name: "jaeger"
     metrics_path: /metrics
     static_configs:

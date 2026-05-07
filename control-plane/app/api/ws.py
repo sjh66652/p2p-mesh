@@ -7,8 +7,10 @@ Security:
   - Max message size enforcement
   - Audit logging for connection events
   - Generic error messages (no internal info leak)
+  - Per-device connection limit (configurable via SIGNALING_MAX_CONNS_PER_DEVICE)
 """
 
+import os
 import time
 import uuid
 import logging
@@ -23,12 +25,17 @@ from app.services.signaling_service import signaling_hub
 logger = logging.getLogger("p2p-mesh.ws")
 router = APIRouter()
 
+# Per-device connection tracking: device_id -> set of WebSocket objects
+_active_device_connections: dict[str, set[WebSocket]] = {}
+# Configurable limit on concurrent connections per device
+MAX_CONNS_PER_DEVICE: int = int(os.getenv("SIGNALING_MAX_CONNS_PER_DEVICE", "3"))
+
 
 @router.websocket("/{device_id}")
 async def websocket_endpoint(
     ws: WebSocket,
     device_id: str,
-):
+) -> None:
     # ---- Phase 1: Accept connection first ----
     await ws.accept()
 
@@ -107,7 +114,39 @@ async def websocket_endpoint(
             await ws.close(code=4003)
             return
 
-    # ---- Phase 4: Register in signaling hub ----
+        # Invalidate tokens issued before the user's last password change
+        token_iat = payload.get("iat")
+        if token_iat is not None:
+            from app.models.user import User as UserModel
+            user_result = await db.execute(select(UserModel).where(UserModel.id == user_id))
+            db_user = user_result.scalar_one_or_none()
+            if db_user is not None and db_user.password_updated_at is not None:
+                if token_iat < db_user.password_updated_at.timestamp():
+                    await ws.send_json({"type": "error", "message": "Token has been revoked"})
+                    await ws.close(code=4001)
+                    return
+
+    # ---- Phase 4: Per-device connection limit ----
+    # Prevents resource exhaustion from a single device opening too many connections
+    if device_id not in _active_device_connections:
+        _active_device_connections[device_id] = set()
+
+    conns = _active_device_connections[device_id]
+    if len(conns) >= MAX_CONNS_PER_DEVICE:
+        # Close the oldest connection for this device
+        oldest = conns.pop()
+        logger.warning(
+            "WS per-device limit hit for device %s: closing oldest connection",
+            device_id,
+        )
+        try:
+            await oldest.close(code=4004, reason="Connection limit reached")
+        except Exception:
+            pass
+
+    _active_device_connections[device_id].add(ws)
+
+    # ---- Phase 5: Register in signaling hub ----
     dev_uuid = uuid.UUID(device_id)
     await signaling_hub.connect(dev_uuid, user_id, ws)
     logger.info("WS connected: device=%s user=%s", device_id, user_id)
@@ -159,6 +198,11 @@ async def websocket_endpoint(
         logger.error("WS error device=%s: %s", device_id, e)
     finally:
         await signaling_hub.disconnect(dev_uuid)
+        # Clean up per-device connection tracking
+        if device_id in _active_device_connections:
+            _active_device_connections[device_id].discard(ws)
+            if not _active_device_connections[device_id]:
+                del _active_device_connections[device_id]
         logger.info("WS disconnected: device=%s user=%s", device_id, user_id)
 
 
@@ -166,8 +210,8 @@ async def handle_signal(
     ws: WebSocket,
     device_id: uuid.UUID,
     user_id: uuid.UUID,
-    msg: dict,
-):
+    msg: dict[str, object],
+) -> None:
     """Process an incoming signaling message with validation."""
     msg_type = msg.get("type", "")
 

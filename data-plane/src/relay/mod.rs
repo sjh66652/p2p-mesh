@@ -54,9 +54,15 @@ impl ForwardingTable {
             stats: RwLock::new(HashMap::new()),
             rate_limits: RwLock::new(HashMap::new()),
             ip_rate_limits: RwLock::new(HashMap::new()),
-            hmac_key: std::env::var("RELAY_HMAC_KEY")
-                .expect("RELAY_HMAC_KEY environment variable must be set.                          Generate with: openssl rand -hex 32")
-                .into_bytes(),
+            hmac_key: {
+                let key = std::env::var("RELAY_HMAC_KEY").unwrap_or_default();
+                if key.is_empty() {
+                    log::warn!(
+                        "RELAY_HMAC_KEY not set — HMAC verification will reject all packets"
+                    );
+                }
+                key.into_bytes()
+            },
         }
     }
 
@@ -66,7 +72,11 @@ impl ForwardingTable {
     }
 
     /// Verify an HMAC tag over the device ID header.
+    /// Returns false if the HMAC key is empty (not configured).
     fn verify_hmac(&self, src_id: &[u8], dst_id: &[u8], tag: &[u8]) -> bool {
+        if self.hmac_key.is_empty() {
+            return false;
+        }
         use hmac::{Hmac, Mac};
         type HmacSha256 = Hmac<Sha256>;
 

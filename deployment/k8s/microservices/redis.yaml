@@ -1,6 +1,21 @@
 # P2P Mesh Network - Redis Deployment
 # In-memory cache, signaling pub/sub, and rate-limit counters.
 # Uses a password from the mesh-secrets Secret.
+#
+# SECURITY NOTE: Password exposure via /proc/*/cmdline
+# The --requirepass $(REDIS_PASSWORD) below passes the password as a
+# command-line argument, making it visible to any process on the node
+# that can read /proc/*/cmdline (e.g., via ps aux).
+#
+# Recommended mitigations (choose one):
+#   1. Use Kubernetes Secrets mounted as files instead of env vars:
+#      mount the password at /etc/redis/conf/redis.conf and use
+#      `redis-server /etc/redis/conf/redis.conf` with `requirepass` inside.
+#   2. Redis 6.2+ supports ACL files -- use a ConfigMap-mounted ACL file
+#      via --aclfile and reference the Secret as a mounted volume.
+#   3. As a lighter alternative, write a startup script that reads the
+#      env var and generates a redis.conf with requirepass at runtime,
+#      then starts redis-server with that config file (not inline args).
 
 apiVersion: v1
 kind: Service

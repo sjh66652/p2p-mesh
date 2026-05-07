@@ -526,13 +526,13 @@ impl IceAgent {
         Some(response)
     }
 
-    /// Resolve role conflict.
+    /// Resolve role conflict per RFC 8445 Section 6.2.
     ///
-    /// Both sides compare tiebreakers. The side with the larger tiebreaker
-    /// becomes the controlling agent.
+    /// Both sides compare tiebreakers. The side with the LARGER tiebreaker
+    /// becomes the CONTROLLING agent, the other becomes CONTROLLED.
     pub async fn resolve_role_conflict(&self, peer_tiebreaker: u64) -> IceRole {
         let mut role = self.role.write().await;
-        if peer_tiebreaker > self.tiebreaker {
+        if self.tiebreaker > peer_tiebreaker {
             *role = IceRole::Controlling;
             log::debug!("ICE role conflict resolved: we are CONTROLLING");
         } else {
@@ -642,16 +642,11 @@ mod tests {
     #[tokio::test]
     async fn test_role_conflict_resolution() {
         let agent = IceAgent::new();
-        // Our tiebreaker should be stable across calls
-        let role = agent.resolve_role_conflict(agent.tiebreaker + 1).await;
-        assert_eq!(role, IceRole::Controlling);
-
+        // Our tiebreaker > peer → we are CONTROLLING
         let role = agent.resolve_role_conflict(agent.tiebreaker - 1).await;
-        // Should now be controlled (because peer tiebreaker is smaller, we stay the same)
-        // Actually, if peer_tiebreaker > our_tiebreaker, we become controlling
-        // Wait, I need to re-check: the side with the LARGER tiebreaker becomes controlling
-        // So if peer is larger, peer is controlling, we are controlled
-        // Wait no: if peer_tiebreaker > self.tiebreaker, *we* become controlling
-        // Let me fix the test
+        assert_eq!(role, IceRole::Controlling);
+        // Peer tiebreaker > ours → we are CONTROLLED
+        let role = agent.resolve_role_conflict(agent.tiebreaker + 1).await;
+        assert_eq!(role, IceRole::Controlled);
     }
 }

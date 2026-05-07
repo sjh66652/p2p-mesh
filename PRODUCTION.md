@@ -129,7 +129,7 @@ echo "<relay-auth-token>" | docker secret create relay_auth_token -
 ### 2.3 部署服务栈
 
 ```bash
-docker stack deploy -c docker-compose.swarm.yml p2p-mesh
+docker stack deploy -c docker-compose.microservices.yml p2p-mesh
 
 # 查看服务
 docker stack services p2p-mesh

@@ -128,6 +128,28 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      # TODO: Enable Trivy vulnerability scanning before production
+      # Uncomment the step below to scan container images for known CVEs.
+      # Install Trivy via aquasecurity/trivy-action which runs the scanner
+      # on the built image and outputs results in SARIF format for GitHub
+      # Security Code Scanning alerts.
+      #
+      # Examples:
+      #   - name: Scan container images with Trivy
+      #     uses: aquasecurity/trivy-action@master
+      #     with:
+      #       image-ref: '${{ env.DOCKER_REGISTRY }}/p2p-mesh-${{ matrix.service.service-name }}:latest'
+      #       format: 'sarif'
+      #       output: 'trivy-results-${{ matrix.service.service-name }}.sarif'
+      #
+      #   - name: Upload Trivy results to GitHub Security
+      #     uses: github/codeql-action/upload-sarif@v3
+      #     with:
+      #       sarif_file: 'trivy-results-${{ matrix.service.service-name }}.sarif'
+      #       category: 'trivy-${{ matrix.service.service-name }}'
+
+  # ---- 构建并推送 Relay image (Rust data-plane, separate from microservices) ----
+
   # ---- 构建并推送 Relay image (Rust data-plane, separate from microservices) ----
   build-and-push-relay:
     needs: lint-and-test

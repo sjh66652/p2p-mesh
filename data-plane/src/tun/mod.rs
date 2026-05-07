@@ -36,22 +36,60 @@ impl TunInterface {
     /// * `netmask` - The subnet mask (e.g., "255.192.0.0" for /10)
     /// * `mtu` - Maximum Transmission Unit (default: 1420 to avoid fragmentation with overlay headers)
     pub fn new(address: &str, netmask: &str, mtu: u16) -> io::Result<Self> {
-        let mut config = tun::Configuration::default();
-        config
-            .name("mesh0")
-            .tap(false) // TUN (L3) mode, not TAP (L2)
-            .packet_info(false)
-            .mtu(mtu as i32)
-            .address(address)
-            .netmask(netmask)
-            .up();
+        // Try device names "mesh0" through "mesh9", falling back if the name is
+        // in use. Creates TUN configuration on-the-fly for each attempt.
+        const MAX_ATTEMPTS: u8 = 10;
 
-        #[cfg(target_os = "linux")]
-        config.platform(|cfg| {
-            cfg.require_root(false);
-        });
+        let device = (0..MAX_ATTEMPTS)
+            .map(|i| {
+                let dev_name = if i == 0 {
+                    "mesh0".to_string()
+                } else {
+                    format!("mesh{}", i)
+                };
+                (dev_name, i)
+            })
+            .find_map(|(dev_name, _i)| {
+                let mut config = tun::Configuration::default();
+                config
+                    .name(&dev_name)
+                    .tap(false) // TUN (L3) mode, not TAP (L2)
+                    .packet_info(false)
+                    .mtu(mtu as i32)
+                    .address(address)
+                    .netmask(netmask)
+                    .up();
 
-        let device = tun::create(&config)?;
+                #[cfg(target_os = "linux")]
+                config.platform(|cfg| {
+                    cfg.require_root(false);
+                });
+
+                match tun::create(&config) {
+                    Ok(dev) => {
+                        log::info!("TUN device created: {}", dev_name);
+                        Some(dev)
+                    }
+                    Err(e) => {
+                        log::warn!(
+                            "TUN device name '{}' failed: {} — trying next",
+                            dev_name,
+                            e
+                        );
+                        None
+                    }
+                }
+            })
+            .ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::AddrInUse,
+                    format!(
+                        "could not create any TUN device after {} attempts",
+                        MAX_ATTEMPTS,
+                    ),
+                )
+            })?;
+
         let name = device.name().to_string();
 
         // Set the interface up and assign the address

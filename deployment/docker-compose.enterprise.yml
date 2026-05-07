@@ -66,6 +66,7 @@ services:
   # ---- Redis Cluster (3-node) ----
   redis-node-0:
     image: redis:7-alpine
+    # SECURITY: --requirepass is visible in /proc. For production, use TLS client certs (Redis 6.2+)
     command: redis-server --port 6379 --cluster-enabled yes --cluster-config-file nodes.conf --cluster-node-timeout 5000 --appendonly yes --requirepass ${REDIS_PASSWORD}
     volumes:
       - redis_node0_data:/data
@@ -75,6 +76,7 @@ services:
 
   redis-node-1:
     image: redis:7-alpine
+    # SECURITY: --requirepass is visible in /proc. For production, use TLS client certs (Redis 6.2+)
     command: redis-server --port 6379 --cluster-enabled yes --cluster-config-file nodes.conf --cluster-node-timeout 5000 --appendonly yes --requirepass ${REDIS_PASSWORD}
     volumes:
       - redis_node1_data:/data
@@ -84,6 +86,7 @@ services:
 
   redis-node-2:
     image: redis:7-alpine
+    # SECURITY: --requirepass is visible in /proc. For production, use TLS client certs (Redis 6.2+)
     command: redis-server --port 6379 --cluster-enabled yes --cluster-config-file nodes.conf --cluster-node-timeout 5000 --appendonly yes --requirepass ${REDIS_PASSWORD}
     volumes:
       - redis_node2_data:/data
@@ -103,7 +106,6 @@ services:
       - "127.0.0.1:9000:9000"
     volumes:
       - clickhouse_data:/var/lib/clickhouse
-      - ./clickhouse/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     networks:
       - mesh-internal
     restart: unless-stopped

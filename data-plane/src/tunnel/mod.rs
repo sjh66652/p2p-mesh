@@ -42,10 +42,11 @@ impl P2PTunnel {
     }
 
     /// Encrypt and prepare data for sending through the tunnel.
-    pub fn encapsulate(&mut self, plaintext: &[u8]) -> Vec<u8> {
-        let encrypted = crypto::encrypt(&self.session_key, plaintext);
+    /// Returns None if encryption fails.
+    pub fn encapsulate(&mut self, plaintext: &[u8]) -> Option<Vec<u8>> {
+        let encrypted = crypto::encrypt(&self.session_key, plaintext).ok()?;
         self.bytes_sent += plaintext.len() as u64;
-        encrypted
+        Some(encrypted)
     }
 
     /// Decrypt data received from the tunnel.
