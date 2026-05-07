@@ -21,7 +21,8 @@ WORKDIR /app
 COPY requirements.txt .
 
 # Install as root, then switch ownership
-RUN pip install --no-cache-dir -r requirements.txt \
+RUN pip install --upgrade pip==26.1.1 \
+    && pip install --no-cache-dir -r requirements.txt \
     && rm -rf /root/.cache/pip
 
 # Copy application
