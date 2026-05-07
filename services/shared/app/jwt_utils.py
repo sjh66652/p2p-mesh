@@ -14,8 +14,15 @@ from shared.app.config import BaseConfig
 
 # Use a module-level settings placeholder; the calling service should
 # import its own config and pass settings explicitly. For convenience,
-# we read from the BaseConfig defaults here so shared code works out of box.
-_settings = BaseConfig()
+# we provide a lazy-loaded BaseConfig so shared code works without crashing
+# when DATABASE_URL is not set at import time.
+_settings = None
+
+def _get_settings():
+    global _settings
+    if _settings is None:
+        _settings = BaseConfig()
+    return _settings
 
 
 def create_access_token(
@@ -29,7 +36,7 @@ def create_access_token(
     Includes the user's plan in the payload for downstream service decisions.
     """
     if settings is None:
-        settings = _settings
+        settings = _get_settings()
 
     now = datetime.now(timezone.utc)
     jti = secrets.token_hex(16)
@@ -57,7 +64,7 @@ def create_refresh_token(user_id: uuid.UUID, settings=None) -> str:
     Create a long-lived refresh token stored in Redis.
     """
     if settings is None:
-        settings = _settings
+        settings = _get_settings()
 
     now = datetime.now(timezone.utc)
     jti = secrets.token_hex(16)
@@ -78,7 +85,7 @@ def decode_token(token: str, expected_type: str = "access", settings=None) -> di
     Returns the decoded payload on success, raises ValueError on failure.
     """
     if settings is None:
-        settings = _settings
+        settings = _get_settings()
 
     try:
         payload = jwt.decode(
@@ -104,7 +111,7 @@ def verify_service_token(token: str, settings=None) -> dict:
     Returns the decoded payload or raises ValueError.
     """
     if settings is None:
-        settings = _settings
+        settings = _get_settings()
 
     try:
         payload = jwt.decode(

@@ -79,9 +79,9 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             return True
         except Exception as e:
             logger.error(f"Redis rate limit error: {e}")
-            # Fail closed with a per-instance fallback budget (20 req/min)
+            # Fail closed with a VERY conservative per-instance fallback budget (5 req/min)
             # Prevents DoS attackers from disabling Redis to bypass all limits
-            return self._check_memory_rate_limit(request, client_ip, max_rpm=20)
+            return self._check_memory_rate_limit(request, client_ip, max_rpm=5)
 
     def _check_memory_rate_limit(self, request: Request, client_ip: str, max_rpm: int | None = None) -> bool:
         """Fallback in-memory rate limit. Single-instance only.

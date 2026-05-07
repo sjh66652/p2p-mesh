@@ -357,7 +357,7 @@ services:
   # ============================================================
   loki:
     image: grafana/loki:latest
-    user: root
+    user: "10001"
     ports:
       - "127.0.0.1:3100:3100"
     volumes:

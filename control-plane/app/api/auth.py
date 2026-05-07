@@ -51,10 +51,11 @@ async def login(
 async def refresh_token(
     refresh_token: str = Body(..., embed=True),
     redis_client=Depends(get_redis),
+    db: AsyncSession = Depends(get_db),
 ):
     """Get a new access token using a refresh token."""
     try:
-        token_data = await auth_service.refresh_access_token(refresh_token, redis_client)
+        token_data = await auth_service.refresh_access_token(refresh_token, redis_client, db)
         return token_data
     except ValueError:
         raise HTTPException(

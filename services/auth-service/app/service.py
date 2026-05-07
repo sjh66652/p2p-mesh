@@ -70,7 +70,7 @@ def create_access_token(user_id: uuid.UUID, role: str = "user", plan: str = "FRE
     }
 
 
-def create_refresh_token(user_id: uuid.UUID) -> str:
+def create_refresh_token(user_id: uuid.UUID, role: str = "user", plan: str = "FREE") -> str:
     """Create a long-lived refresh token stored in Redis."""
     now = datetime.now(timezone.utc)
     jti = secrets.token_hex(16)
@@ -79,6 +79,8 @@ def create_refresh_token(user_id: uuid.UUID) -> str:
         "sub": str(user_id),
         "jti": jti,
         "type": "refresh",
+        "role": role,
+        "plan": plan,
         "iat": now,
         "exp": now + timedelta(days=settings.JWT_REFRESH_EXPIRE_DAYS),
     }
@@ -107,12 +109,14 @@ def _validate_password_strength(password: str):
 
 
 async def register_user(db: AsyncSession, data: UserRegister) -> User:
-    """Register a new user with password strength validation."""
-    _validate_password_strength(data.password)
-
+    """Register a new user with password strength validation.
+    Email check runs FIRST to prevent timing side-channel enumeration."""
+    # Check email uniqueness BEFORE password validation to avoid timing leak
     existing = await db.execute(select(User).where(User.email == data.email))
     if existing.scalar_one_or_none():
         raise ValueError("Email already registered")
+
+    _validate_password_strength(data.password)
 
     user = User(
         email=data.email,
@@ -143,8 +147,9 @@ async def login_user(
         attempts = await redis_client.get(lockout_key)
         if attempts and int(attempts) >= settings.LOGIN_MAX_ATTEMPTS:
             ttl = await redis_client.ttl(lockout_key)
+            logger.info("Login lockout for %s: %d seconds remaining", data.email, ttl)
             raise ValueError(
-                f"Account locked due to too many failed attempts. Try again in {ttl // 60 + 1} minutes."
+                "Too many login attempts. Please try again later."
             )
 
     result = await db.execute(select(User).where(User.email == data.email))
@@ -168,7 +173,7 @@ async def login_user(
 
     # Create tokens with plan field
     token_data = create_access_token(user.id, role=user.role.value, plan=user.plan.value)
-    refresh_token = create_refresh_token(user.id)
+    refresh_token = create_refresh_token(user.id, role=user.role.value, plan=user.plan.value)
 
     # Store refresh token in Redis for revocation
     if redis_client:
@@ -242,9 +247,11 @@ async def update_user(db: AsyncSession, user: User, data: dict) -> User:
 
 
 async def change_password(
-    db: AsyncSession, user: User, old_password: str, new_password: str
+    db: AsyncSession, user: User, old_password: str, new_password: str,
+    redis_client=None,
 ):
-    """Change password with strength validation and old-password verification."""
+    """Change password with strength validation, old-password verification,
+    and token invalidation (all existing sessions are revoked)."""
     _validate_password_strength(new_password)
 
     if not verify_password(old_password, user.password_hash):
@@ -252,6 +259,21 @@ async def change_password(
 
     user.password_hash = hash_password(new_password)
     await db.flush()
+
+    # Invalidate all existing refresh tokens for this user
+    if redis_client:
+        # Delete legacy single-session key
+        await redis_client.delete(f"refresh_token:{user.id}")
+        # Delete all session-specific refresh tokens via scan
+        cursor = 0
+        while True:
+            cursor, keys = await redis_client.scan(
+                cursor, match=f"refresh_token:{user.id}:*", count=100
+            )
+            if keys:
+                await redis_client.delete(*keys)
+            if cursor == 0:
+                break
 
 
 async def logout_user(redis_client, token: str):

@@ -9,8 +9,11 @@
 //!   Client → Server: "ping"
 //!   Server → Client: "public_ip:public_port"
 
+use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::time::{Duration, Instant};
 use tokio::net::UdpSocket;
+use tokio::sync::Mutex;
 
 /// Query a STUN server to discover our public (mapped) address.
 ///
@@ -85,48 +88,81 @@ impl NatClassification {
 
 /// Classify NAT type based on multi-server STUN probe results.
 ///
-/// Logic:
-/// - If all servers return the same IP:port → Full Cone or Open
-/// - If same IP but different port → Symmetric
-/// - Additional classification requires connectivity checks
+/// Uses RFC 3489 / RFC 5780 classification methodology:
+///
+/// 1. Query multiple STUN servers (at least 2 from different IPs for accuracy).
+/// 2. Compare mapped addresses returned by each server.
+/// 3. Classify based on mapping consistency:
+///    - Same IP:port from all servers → Full Cone / Restricted Cone / Port Restricted
+///      (cannot distinguish without further connectivity tests)
+///    - Same IP, different ports → Port Restricted Cone or Symmetric
+///      (if port changes per destination, likely Symmetric)
+///    - Different IPs → Multiple NAT layers or carrier-grade NAT → Unknown
+///
+/// Full disambiguation between Full/Restricted/Port-Restricted requires
+/// a second phase where one STUN server attempts to reach the mapping
+/// discovered by another (CHANGE-REQUEST / connectivity check).
 pub fn classify_nat(results: &[(String, Result<SocketAddr, String>)]) -> NatClassification {
-    let addrs: Vec<SocketAddr> = results
+    let successes: Vec<&SocketAddr> = results
         .iter()
-        .filter_map(|(_, r)| r.as_ref().ok().copied())
+        .filter_map(|(_, r)| r.as_ref().ok())
         .collect();
 
-    if addrs.is_empty() {
+    if successes.is_empty() {
         return NatClassification::Unknown;
     }
 
-    if addrs.len() == 1 {
-        return NatClassification::FullCone;
+    // Single server result — cannot reliably classify
+    if successes.len() == 1 {
+        return NatClassification::Unknown;
     }
 
-    // Check if all mapped addresses are the same
-    let first = addrs[0];
-    let all_same = addrs.iter().all(|a| a == &first);
+    let first = successes[0];
 
-    if all_same {
+    // Check if all mapped addresses are identical
+    let all_identical = successes.iter().all(|a| a == &first);
+
+    if all_identical {
+        // Same IP:port from all servers → potentially Full Cone, Restricted Cone,
+        // or Port Restricted Cone (all three produce consistent mappings).
+        // Without a connectivity check between servers we default to Full Cone
+        // as the optimistic case (it works best for P2P).
         NatClassification::FullCone
     } else {
-        // Different ports → likely symmetric
-        let same_ip = addrs.iter().all(|a| a.ip() == first.ip());
+        // Mappings differ — check if it's just the port that changes
+        let same_ip = successes.iter().all(|a| a.ip() == first.ip());
         if same_ip {
+            // Same IP, different port for each destination → Symmetric NAT
+            // (each destination gets its own mapping)
             NatClassification::Symmetric
         } else {
-            NatClassification::Unknown
+            // Different IPs entirely — could be carrier-grade NAT, multiple
+            // NAT layers, or IPv4/IPv6 mix. Conservative: treat as symmetric.
+            NatClassification::Symmetric
         }
     }
 }
 
-/// Run the STUN server loop.
+/// Per-IP rate limit state for the STUN server.
+struct IpRateLimit {
+    count: u32,
+    window_start: Instant,
+}
+
+/// Run the STUN server loop with per-IP rate limiting.
 ///
 /// Binds to 0.0.0.0:3478 (standard STUN port) and responds to each
 /// "ping" request with the sender's IP:port as seen by the server.
+///
+/// Rate limiting: max 10 requests per 10-second window per source IP.
+/// This mitigates reflection/amplification attacks (DDoS vector).
 pub async fn run_stun_server(bind_addr: &str) -> Result<(), std::io::Error> {
     let socket = UdpSocket::bind(bind_addr).await?;
     log::info!("STUN server listening on {}", bind_addr);
+
+    let rate_limits: Mutex<HashMap<std::net::IpAddr, IpRateLimit>> = Mutex::new(HashMap::new());
+    let rate_limit_max: u32 = 10; // max requests per window per IP
+    let rate_limit_window = Duration::from_secs(10);
 
     let mut buf = [0u8; 1024];
 
@@ -135,16 +171,34 @@ pub async fn run_stun_server(bind_addr: &str) -> Result<(), std::io::Error> {
         let msg = std::str::from_utf8(&buf[..n]).unwrap_or("");
         log::trace!("STUN request from {}: {}", src, msg);
 
+        // Rate limit check
+        {
+            let mut limits = rate_limits.lock().await;
+            let now = Instant::now();
+            let entry = limits
+                .entry(src.ip())
+                .or_insert(IpRateLimit { count: 0, window_start: now });
+
+            if now.duration_since(entry.window_start) > rate_limit_window {
+                entry.window_start = now;
+                entry.count = 0;
+            }
+
+            entry.count += 1;
+            if entry.count > rate_limit_max {
+                log::debug!("STUN rate limit exceeded for {}", src.ip());
+                continue;
+            }
+        }
+
+        // Periodically clean up old entries (every ~1000 requests)
+        if fastrand::u8(..) == 0 {
+            let mut limits = rate_limits.lock().await;
+            let now = Instant::now();
+            limits.retain(|_, v| now.duration_since(v.window_start) < rate_limit_window * 3);
+        }
+
         if msg.trim() == "ping" {
-            // SECURITY (reflection/amplification): This STUN server responds
-            // to any "ping" with the sender's IP:port. An attacker could spoof
-            // a victim's IP as the source to trick this server into sending a
-            // response to the victim (reflection). The response is small (linearly
-            // proportional to request size), so amplification is minimal (< 2x).
-            // RATE LIMIT NOTE: In production, add per-IP rate limiting here
-            // (e.g., max 10 requests/second per source IP) to further mitigate
-            // abuse. Consider adding a connection tracking table with IP-based
-            // rate limits.
             let response = format!("{}:{}", src.ip(), src.port());
             socket.send_to(response.as_bytes(), src).await?;
             log::debug!("STUN response to {}: {}", src, response);

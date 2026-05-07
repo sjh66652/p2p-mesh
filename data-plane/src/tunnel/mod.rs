@@ -245,11 +245,12 @@ pub async fn establish_p2p_connection(
         .ok()
         .and_then(|k| if k.is_empty() { None } else { Some(k) })
         .unwrap_or_else(|| {
-            log::warn!("PUNCH_HMAC_KEY not set — using per-session random key.                         Set PUNCH_HMAC_KEY in production.");
-            use rand::RngCore;
-            let mut key = vec![0u8; 32];
-            rand::rngs::OsRng.fill_bytes(&mut key);
-            key
+            // PUNCH_HMAC_KEY is required for production. Without it, HMAC authentication
+            // during hole punching provides zero security (random key never shared with peer).
+            panic!(
+                "PUNCH_HMAC_KEY environment variable is required. \
+                 Generate with: openssl rand -hex 32"
+            );
         });
 
     let punch_result = puncher::execute_punch(

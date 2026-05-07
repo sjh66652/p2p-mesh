@@ -192,7 +192,7 @@ app.add_middleware(LoggingMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS if not settings.DEBUG else ["*"],
-    allow_credentials=True,
+    allow_credentials=not settings.DEBUG,  # Never set credentials=True with wildcard origins
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
     allow_headers=["Authorization", "Content-Type"],
     max_age=600,

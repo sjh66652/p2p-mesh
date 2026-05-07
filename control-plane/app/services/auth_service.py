@@ -181,7 +181,7 @@ async def login_user(
 
 
 async def refresh_access_token(
-    refresh_token_str: str, redis_client, db: AsyncSession = None
+    refresh_token_str: str, redis_client, db: AsyncSession
 ) -> dict:
     """Issue a new access token using a valid refresh token."""
     try:
@@ -221,15 +221,11 @@ async def refresh_access_token(
             raise ValueError("Refresh token has been revoked")
 
     # Re-fetch user from DB to get current role (prevents stale role in token)
-    role = "user"
-    if db:
-        result = await db.execute(select(User).where(User.id == user_id))
-        user = result.scalar_one_or_none()
-        if not user:
-            raise ValueError("User not found")
-        role = user.role.value
-    else:
-        role = payload.get("role", "user")
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise ValueError("User not found")
+    role = user.role.value
 
     return create_access_token(user_id, role=role)
 

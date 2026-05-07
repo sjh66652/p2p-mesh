@@ -12,6 +12,9 @@
 //! This upgrades the basic STUN + hole punching to a production-grade
 //! ICE implementation suitable for reliable P2P connectivity.
 
+pub mod connectivity;
+pub mod path_selection;
+
 use std::collections::{HashMap, HashSet};
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -350,59 +353,93 @@ impl IceAgent {
     /// Perform connectivity checks on the highest-priority pairs.
     ///
     /// Returns the pair that succeeded, or None if none succeeded yet.
+    /// Does NOT hold any lock across await points to avoid blocking other tasks.
     pub async fn perform_connectivity_checks(
         &self,
         socket: &Arc<tokio::net::UdpSocket>,
     ) -> Option<IceCandidate> {
-        let mut pairs = self.pairs.write().await;
+        // Phase 1: Collect candidate pairs to check (read lock only)
+        let candidates_to_check: Vec<(usize, SocketAddr)> = {
+            let pairs = self.pairs.read().await;
+            pairs.iter()
+                .enumerate()
+                .filter(|(_, p)| p.state == PairState::Waiting || p.state == PairState::InProgress)
+                .map(|(i, p)| (i, p.remote.addr))
+                .collect()
+        };
 
-        // Find pairs in Waiting or InProgress state
-        for pair in pairs.iter_mut() {
-            if pair.state != PairState::Waiting && pair.state != PairState::InProgress {
-                continue;
+        if candidates_to_check.is_empty() {
+            return None;
+        }
+
+        // Phase 2: Mark pairs as InProgress and send checks (short write lock)
+        {
+            let mut pairs = self.pairs.write().await;
+            for (idx, _) in &candidates_to_check {
+                if let Some(pair) = pairs.get_mut(*idx) {
+                    pair.state = PairState::InProgress;
+                    pair.last_check = Some(Instant::now());
+                    pair.checks_sent += 1;
+                }
             }
+        }
 
-            pair.state = PairState::InProgress;
-            pair.last_check = Some(Instant::now());
-            pair.checks_sent += 1;
-
-            // Build a STUN binding request
+        // Phase 3: Send binding requests to each candidate (no lock held)
+        // We'll send to the first candidate and wait for a response.
+        // In a full ICE implementation this would be async across all pairs.
+        if let Some((idx, remote_addr)) = candidates_to_check.first() {
             let binding_request = self.build_binding_request();
 
-            // Send to remote candidate
-            match socket.send_to(&binding_request, pair.remote.addr).await {
+            match socket.send_to(&binding_request, remote_addr).await {
                 Ok(_) => {
-                    log::trace!(
-                        "ICE check: {} -> {} (pair priority={})",
-                        pair.local.addr, pair.remote.addr,
-                        Self::pair_priority(pair.local.priority, pair.remote.priority),
-                    );
+                    log::trace!("ICE check sent to {}", remote_addr);
                 }
                 Err(e) => {
-                    log::debug!("ICE check send failed to {}: {}", pair.remote.addr, e);
-                    pair.state = PairState::Failed;
+                    log::debug!("ICE check send failed to {}: {}", remote_addr, e);
+                    let mut pairs = self.pairs.write().await;
+                    if let Some(pair) = pairs.get_mut(*idx) {
+                        pair.state = PairState::Failed;
+                    }
+                    return None;
                 }
             }
 
-            // For simplicity, mark first successful pair as selected
-            // In real ICE, this waits for a binding response
+            // Phase 4: Wait for binding response (no lock held during I/O)
             if let Some(_response) = self.wait_for_binding_response(socket).await {
-                pair.state = PairState::Succeeded;
-                pair.nominated = true;
+                // Phase 5: Mark pair as succeeded (short write locks)
+                {
+                    let mut pairs = self.pairs.write().await;
+                    if let Some(pair) = pairs.get_mut(*idx) {
+                        pair.state = PairState::Succeeded;
+                        pair.nominated = true;
+                    }
+                }
 
                 let mut state = self.state.write().await;
                 *state = IceConnectionState::Connected;
 
-                let mut selected = self.selected_pair.write().await;
-                *selected = Some(pair.clone());
+                let selected_pair = {
+                    let pairs = self.pairs.read().await;
+                    pairs.get(*idx).cloned()
+                };
 
-                log::info!(
-                    "ICE connection established via {}: {} <-> {}",
-                    pair.local.candidate_type as i32,
-                    pair.local.addr, pair.remote.addr,
-                );
+                if let Some(pair) = selected_pair {
+                    let mut selected = self.selected_pair.write().await;
+                    *selected = Some(pair.clone());
 
-                return Some(pair.remote.clone());
+                    log::info!(
+                        "ICE connection established via {}: {} <-> {}",
+                        match pair.local.candidate_type {
+                            CandidateType::Host => "host",
+                            CandidateType::Srflx => "srflx",
+                            CandidateType::Prflx => "prflx",
+                            CandidateType::Relay => "relay",
+                        },
+                        pair.local.addr, pair.remote.addr,
+                    );
+
+                    return Some(pair.remote.clone());
+                }
             }
         }
 
@@ -510,7 +547,6 @@ impl IceAgent {
     /// Consent must be refreshed every 30 seconds during active communication.
     pub async fn check_consent(&self) -> bool {
         let last = self.last_consent.read().await;
-        Ok(())?; // Required to keep async pattern consistent
         let elapsed = last.elapsed();
         if elapsed > Duration::from_secs(30) {
             log::warn!("ICE consent expired (last check: {:?} ago)", elapsed);

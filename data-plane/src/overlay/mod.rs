@@ -97,6 +97,11 @@ impl OverlayNetwork {
         ip_to_peer.insert(virtual_ip, peer_id.to_string());
     }
 
+    /// Add a route to the overlay route table.
+    pub async fn add_route(&self, route: Route) {
+        self.route_table.add_route(route).await;
+    }
+
     /// Remove a peer registration.
     pub async fn unregister_peer(&self, peer_id: &str) {
         let mut peer_ips = self.peer_ips.write().await;

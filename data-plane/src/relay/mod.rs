@@ -17,6 +17,7 @@ use std::sync::Arc;
 use sha2::Sha256;
 use tokio::net::UdpSocket;
 use tokio::sync::RwLock;
+use zeroize::Zeroize;
 
 /// Packet format (wire protocol):
 /// ┌─────────────────┬──────────────────┬───────────────────────┬──────────┐
@@ -192,6 +193,13 @@ impl ForwardingTable {
         let total_packets: u64 = stats.values().map(|(_, p)| p).sum();
         let device_count = self.device_addrs.read().await.len();
         (total_bytes, total_packets, device_count)
+    }
+}
+
+/// Zeroize the HMAC key on drop to prevent lingering secrets in memory.
+impl Drop for ForwardingTable {
+    fn drop(&mut self) {
+        self.hmac_key.zeroize();
     }
 }
 

@@ -270,6 +270,14 @@ impl TurnServer {
 
         drop(allocations);
 
+        // Update bytes_sent for the allocation after forwarding
+        {
+            let mut allocations = self.allocations.write().await;
+            if let Some(alloc) = allocations.get_mut(&relayed_addr) {
+                alloc.bytes_sent = alloc.bytes_sent.saturating_add(data.len() as u64);
+            }
+        }
+
         // Forward to peer — we need the socket for this
         // In the real implementation, the TurnServer owns a socket
         log::trace!(

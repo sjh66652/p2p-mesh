@@ -43,14 +43,20 @@ pub enum HandshakeState {
 }
 
 /// Noise IK pattern state machine.
+#[derive(ZeroizeOnDrop)]
 pub struct NoiseIKHandshake {
     state: HandshakeState,
     /// Our static keypair
     static_keypair: NoiseStaticKeypair,
     /// Peer's static public key (must be known out-of-band for IK pattern)
     peer_static_public: [u8; 32],
-    /// Ephemeral keypair (generated per-handshake, zeroed on drop)
+    /// Our ephemeral keypair (generated per-handshake, zeroed on drop).
+    /// On initiator side: stores the initiator's ephemeral secret for ee/se DH.
+    /// On responder side: stores the responder's ephemeral secret after generation.
     ephemeral_secret: Option<EphemeralSecret>,
+    /// Peer's ephemeral public key (set during handshake processing).
+    /// Used for DH operations against the remote party's ephemeral key.
+    peer_ephemeral_public: [u8; 32],
     /// Chaining key (from HKDF)
     chaining_key: [u8; 32],
     /// Handshake hash (transcript of all handshake messages)
@@ -108,6 +114,7 @@ impl NoiseIKHandshake {
             static_keypair: our_static,
             peer_static_public,
             ephemeral_secret: None,
+            peer_ephemeral_public: [0u8; 32],
             chaining_key,
             handshake_hash,
         }
@@ -115,8 +122,8 @@ impl NoiseIKHandshake {
 
     /// Build the initiator's first message: -> e, es, s, ss
     ///
-    /// Returns (message_to_send, transport_keys) if handshake is complete,
-    /// or just the message if more rounds are needed.
+    /// Returns the message to send. After calling this, the initiator should
+    /// wait for the responder's reply and call `process_responder_message`.
     pub fn build_initiator_message(&mut self) -> Result<Vec<u8>, NoiseError> {
         if self.state != HandshakeState::Init {
             return Err(NoiseError::InvalidState);
@@ -156,7 +163,7 @@ impl NoiseIKHandshake {
         mix_key(&mut self.chaining_key, ss_shared.as_bytes());
 
         // Build message: e || encrypted_s
-        let mut message = Vec::with_capacity(32 + encrypted_s.len() + 16);
+        let mut message = Vec::with_capacity(32 + encrypted_s.len());
         message.extend_from_slice(&ephemeral_public_bytes);
         message.extend_from_slice(&encrypted_s);
 
@@ -164,16 +171,199 @@ impl NoiseIKHandshake {
         self.state = HandshakeState::InitiatorSent;
 
         log::info!("Noise IK: Initiator message built ({} bytes)", message.len());
+        Ok(message)
+    }
 
-        // Derive transport keys
+    /// Process the responder's reply: <- e, ee, se
+    ///
+    /// Takes the raw response (responder's ephemeral public key, 32 bytes)
+    /// and completes the handshake, transitioning to Established.
+    /// Returns the transport (send, recv) keys.
+    pub fn process_responder_message(
+        &mut self,
+        response: &[u8],
+    ) -> Result<(NoiseTransportKey, NoiseTransportKey), NoiseError> {
+        if self.state != HandshakeState::InitiatorSent {
+            return Err(NoiseError::InvalidState);
+        }
+        if response.len() < 32 {
+            return Err(NoiseError::InvalidState);
+        }
+
+        let ephem = self.ephemeral_secret.as_ref()
+            .ok_or(NoiseError::InvalidState)?;
+
+        // Parse responder's ephemeral public key
+        let mut resp_ephemeral_bytes = [0u8; 32];
+        resp_ephemeral_bytes.copy_from_slice(&response[..32]);
+        let resp_ephemeral = PublicKey::from(resp_ephemeral_bytes);
+
+        // Update handshake hash: h = SHA-256(h || e.public)
+        let mut hasher = Sha256::new();
+        hasher.update(&self.handshake_hash);
+        hasher.update(&resp_ephemeral_bytes);
+        self.handshake_hash.copy_from_slice(&hasher.finalize());
+
+        // ee: DH(our_ephemeral, responder_ephemeral) — provides forward secrecy
+        let ee_shared = ephem.diffie_hellman(&resp_ephemeral);
+        mix_key(&mut self.chaining_key, ee_shared.as_bytes());
+
+        // se: DH(our_static, responder_ephemeral)
+        let se_shared = self.static_keypair.secret.diffie_hellman(&resp_ephemeral);
+        mix_key(&mut self.chaining_key, se_shared.as_bytes());
+
+        self.state = HandshakeState::Established;
+
+        let (send_key, recv_key) = split(&self.chaining_key);
+        log::info!("Noise IK: Handshake established (initiator)");
+        Ok((
+            NoiseTransportKey::new(send_key),
+            NoiseTransportKey::new(recv_key),
+        ))
+    }
+
+    /// Initialize a Noise IK handshake as the responder.
+    ///
+    /// The initiator's static public key is not known until the first
+    /// message is processed via `process_initiator_message`.
+    pub fn responder(our_static: NoiseStaticKeypair) -> Self {
+        let mut chaining_key = [0u8; 32];
+        chaining_key.copy_from_slice(b"Noise_IK_25519_ChaChaPoly_SHA256");
+
+        let mut handshake_hash = [0u8; 32];
+        let mut hasher = Sha256::new();
+        hasher.update(b"Noise_IK_25519_ChaChaPoly_SHA256");
+        handshake_hash.copy_from_slice(&hasher.finalize());
+
+        Self {
+            state: HandshakeState::Init,
+            static_keypair: our_static,
+            peer_static_public: [0u8; 32], // unknown until initiator message
+            ephemeral_secret: None,
+            peer_ephemeral_public: [0u8; 32],
+            chaining_key,
+            handshake_hash,
+        }
+    }
+
+    /// Process the initiator's first message: -> e, es, s, ss
+    ///
+    /// Decrypts and stores the initiator's static public key, derives the
+    /// shared secrets, and returns the initiator's static public key bytes.
+    pub fn process_initiator_message(
+        &mut self,
+        message: &[u8],
+    ) -> Result<[u8; 32], NoiseError> {
+        if self.state != HandshakeState::Init {
+            return Err(NoiseError::InvalidState);
+        }
+        if message.len() < 32 + 12 + 16 {
+            return Err(NoiseError::InvalidState);
+        }
+
+        // Parse initiator's ephemeral public key (first 32 bytes)
+        let mut init_ephemeral_bytes = [0u8; 32];
+        init_ephemeral_bytes.copy_from_slice(&message[..32]);
+        let init_ephemeral = PublicKey::from(init_ephemeral_bytes);
+
+        // Update handshake hash: h = SHA-256(h || e.public)
+        let mut hasher = Sha256::new();
+        hasher.update(&self.handshake_hash);
+        hasher.update(&init_ephemeral_bytes);
+        self.handshake_hash.copy_from_slice(&hasher.finalize());
+
+        // es: DH(our_static, initiator_ephemeral)
+        let es_shared = self.static_keypair.secret.diffie_hellman(&init_ephemeral);
+        mix_key(&mut self.chaining_key, es_shared.as_bytes());
+
+        // Store initiator's ephemeral public for later ee/se DH
+        self.peer_ephemeral_public = init_ephemeral_bytes;
+
+        // The remainder is the encrypted initiator static public key
+        let encrypted_s = &message[32..];
+
+        // Update handshake hash: h = SHA-256(h || encrypted_s)
+        hasher = Sha256::new();
+        hasher.update(&self.handshake_hash);
+        hasher.update(encrypted_s);
+        self.handshake_hash.copy_from_slice(&hasher.finalize());
+
+        // s: decrypt initiator's static public key
+        let init_static_bytes = decrypt_with_key(
+            &self.chaining_key,
+            encrypted_s,
+        ).ok_or(NoiseError::DecryptionFailed)?;
+
+        let mut init_static_pub = [0u8; 32];
+        if init_static_bytes.len() != 32 {
+            return Err(NoiseError::DecryptionFailed);
+        }
+        init_static_pub.copy_from_slice(&init_static_bytes);
+        self.peer_static_public = init_static_pub;
+
+        let init_static = PublicKey::from(init_static_pub);
+
+        // ss: DH(our_static, initiator_static)
+        let ss_shared = self.static_keypair.secret.diffie_hellman(&init_static);
+        mix_key(&mut self.chaining_key, ss_shared.as_bytes());
+
+        self.state = HandshakeState::ResponderSent;
+
+        log::info!("Noise IK: Initiator message processed, initiator static key decrypted");
+        Ok(init_static_pub)
+    }
+
+    /// Build the responder's reply: <- e, ee, se
+    ///
+    /// Call after `process_initiator_message`. Returns the message to send
+    /// and the transport keys.
+    pub fn build_responder_message(
+        &mut self,
+    ) -> Result<(Vec<u8>, NoiseTransportKey, NoiseTransportKey), NoiseError> {
+        if self.state != HandshakeState::ResponderSent {
+            return Err(NoiseError::InvalidState);
+        }
+
+        // Reconstruct initiator's ephemeral public key
+        let init_ephemeral = PublicKey::from(self.peer_ephemeral_public);
+
+        // Generate responder's ephemeral keypair
+        let resp_ephemeral_secret = EphemeralSecret::random_from_rng(rand::thread_rng());
+        let resp_ephemeral_public = PublicKey::from(&resp_ephemeral_secret);
+        let resp_ephemeral_bytes = *resp_ephemeral_public.as_bytes();
+
+        // Update handshake hash: h = SHA-256(h || e.public)
+        let mut hasher = Sha256::new();
+        hasher.update(&self.handshake_hash);
+        hasher.update(&resp_ephemeral_bytes);
+        self.handshake_hash.copy_from_slice(&hasher.finalize());
+
+        // ee: DH(our_ephemeral, initiator_ephemeral) — forward secrecy
+        let ee_shared = resp_ephemeral_secret.diffie_hellman(&init_ephemeral);
+        mix_key(&mut self.chaining_key, ee_shared.as_bytes());
+
+        // se: DH(our_static, initiator_ephemeral) — forward secrecy component
+        let se_shared = self.static_keypair.secret.diffie_hellman(&init_ephemeral);
+        mix_key(&mut self.chaining_key, se_shared.as_bytes());
+
+        self.state = HandshakeState::Established;
+
         let (send_key, recv_key) = split(&self.chaining_key);
 
-        Ok(message)
+        log::info!("Noise IK: Handshake established (responder)");
+        Ok((
+            resp_ephemeral_bytes.to_vec(),
+            NoiseTransportKey::new(send_key),
+            NoiseTransportKey::new(recv_key),
+        ))
     }
 
     /// Get the transport keys after handshake completion.
     pub fn transport_keys(&self) -> Option<(NoiseTransportKey, NoiseTransportKey)> {
-        if self.state == HandshakeState::InitiatorSent || self.state == HandshakeState::ResponderSent {
+        if self.state == HandshakeState::InitiatorSent
+            || self.state == HandshakeState::ResponderSent
+            || self.state == HandshakeState::Established
+        {
             let (send_key, recv_key) = split(&self.chaining_key);
             Some((
                 NoiseTransportKey::new(send_key),
@@ -298,6 +488,18 @@ fn encrypt_with_key(key: &[u8; 32], plaintext: &[u8], rng: &mut impl RngCore) ->
     result
 }
 
+/// Decrypt data with a symmetric key (AEAD).
+/// Expects format: [nonce (12B)][ciphertext + tag].
+fn decrypt_with_key(key: &[u8; 32], data: &[u8]) -> Option<Vec<u8>> {
+    if data.len() < 12 + 16 {
+        return None;
+    }
+    let (nonce_bytes, ciphertext) = data.split_at(12);
+    let nonce = Nonce::from_slice(nonce_bytes);
+    let cipher = ChaCha20Poly1305::new(Key::from_slice(key));
+    cipher.decrypt(nonce, ciphertext).ok()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -380,5 +582,45 @@ mod tests {
         assert!(message.is_ok());
         let msg = message.unwrap();
         assert!(msg.len() > 32);
+    }
+
+    #[test]
+    fn test_noise_ik_full_handshake() {
+        let init_static = NoiseStaticKeypair::generate();
+        let resp_static = NoiseStaticKeypair::generate();
+
+        // Initator side
+        let mut initiator = NoiseIKHandshake::initiator(
+            init_static,
+            resp_static.public_key_bytes(),
+        );
+
+        let init_msg = initiator.build_initiator_message().unwrap();
+        assert_eq!(initiator.state, HandshakeState::InitiatorSent);
+
+        // Responder side
+        let mut responder = NoiseIKHandshake::responder(resp_static);
+        let init_static_decrypted = responder.process_initiator_message(&init_msg).unwrap();
+
+        assert_eq!(init_static_decrypted.len(), 32);
+        assert_eq!(responder.state, HandshakeState::ResponderSent);
+
+        let (resp_msg, mut resp_send, mut resp_recv) = responder.build_responder_message().unwrap();
+        assert_eq!(responder.state, HandshakeState::Established);
+
+        // Initator processes response
+        let (mut init_send, mut init_recv) = initiator.process_responder_message(&resp_msg).unwrap();
+        assert_eq!(initiator.state, HandshakeState::Established);
+
+        // Verify bidirectional encryption works
+        let plaintext = b"Hello, Noise IK!";
+        let encrypted_a = init_send.encrypt(plaintext);
+        let decrypted_b = resp_recv.decrypt(&encrypted_a);
+        assert_eq!(decrypted_b, Some(plaintext.to_vec()));
+
+        let reply = b"Hello back!";
+        let encrypted_b = resp_send.encrypt(reply);
+        let decrypted_a = init_recv.decrypt(&encrypted_b);
+        assert_eq!(decrypted_a, Some(reply.to_vec()));
     }
 }

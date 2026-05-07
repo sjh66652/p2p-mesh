@@ -11,7 +11,7 @@
 # 启动：
 #   docker compose -f docker-compose.prod.yml --env-file ../.env.prod up -d
 
-version: "3.8"
+
 
 services:
   # ---- API Gateway (Nginx + SSL) ----

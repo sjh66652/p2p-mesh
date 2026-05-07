@@ -22,8 +22,8 @@ use tokio::sync::mpsc;
 ///
 /// Wraps the OS TUN device and provides async read/write for IP packets.
 pub struct TunInterface {
-    /// Underlying TUN device (sync I/O)
-    device: tun::Device,
+    /// TUN device name (e.g., "mesh0")
+    name: String,
     /// Async wrapper for tokio integration
     async_fd: AsyncFd<tun::Device>,
 }
@@ -52,37 +52,38 @@ impl TunInterface {
         });
 
         let device = tun::create(&config)?;
+        let name = device.name().to_string();
 
         // Set the interface up and assign the address
         #[cfg(target_os = "linux")]
         {
-            let name = device.name();
             // Assign IP address (requires iproute2 or netlink)
             let status = std::process::Command::new("ip")
-                .args(["addr", "add", &format!("{}/10", address), "dev", name])
+                .args(["addr", "add", &format!("{}/10", address), "dev", &name])
                 .output();
             if let Err(e) = status {
                 log::warn!("Failed to assign IP to {}: {} (try manual: ip addr add {}/10 dev {})", name, e, address, name);
             }
             let status = std::process::Command::new("ip")
-                .args(["link", "set", "up", name])
+                .args(["link", "set", "up", &name])
                 .output();
             if let Err(e) = status {
                 log::warn!("Failed to bring up {}: {}", name, e);
             }
         }
 
+        // Move device into AsyncFd — this consumes device, so save name first
         let async_fd = AsyncFd::new(device)?;
 
         Ok(Self {
-            device: tun::create(&config)?, // Re-create to avoid move issues — in production use a single device
+            name,
             async_fd,
         })
     }
 
     /// Get the interface name (e.g., "mesh0").
     pub fn name(&self) -> &str {
-        self.device.name()
+        &self.name
     }
 
     /// Read an IP packet from the TUN interface (async).
@@ -119,11 +120,6 @@ impl TunInterface {
             }
             Err(e) => Err(e),
         }
-    }
-
-    /// Close the TUN interface and return the underlying device.
-    pub fn close(self) -> tun::Device {
-        self.device
     }
 }
 

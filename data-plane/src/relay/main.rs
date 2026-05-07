@@ -91,6 +91,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let heartbeat_table = forwarding_table.clone();
     let relay_token = args.relay_auth_token.clone();
     let max_conn = args.max_connections;
+    let client = reqwest::Client::new();
 
     let heartbeat_task = tokio::spawn(async move {
         loop {

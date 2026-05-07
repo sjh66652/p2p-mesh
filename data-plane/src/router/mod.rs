@@ -12,6 +12,7 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use ipnet::Ipv4Net;
@@ -58,18 +59,19 @@ pub enum RouteType {
 #[derive(Debug, Clone)]
 pub struct EcmpGroup {
     pub cidr: Ipv4Net,
-    pub routes: Vec<Route>,
+    pub routes: Vec<Arc<Route>>,
     pub next_idx: usize, // Round-robin index
 }
 
 /// The overlay route table.
+/// Routes are stored behind Arc to avoid cloning on every lookup.
 pub struct RouteTable {
     /// CIDR -> list of routes (sorted by prefix length descending, then metric ascending)
-    routes: RwLock<BTreeMap<String, Vec<Route>>>,
+    routes: RwLock<BTreeMap<String, Vec<Arc<Route>>>>,
     /// ECMP groups for load-balanced routes
     ecmp: RwLock<HashMap<String, EcmpGroup>>,
     /// Default route (0.0.0.0/0)
-    default_route: RwLock<Option<Route>>,
+    default_route: RwLock<Option<Arc<Route>>>,
 }
 
 impl RouteTable {
@@ -94,7 +96,8 @@ impl RouteTable {
         // Remove existing route to same peer for this CIDR
         entry.retain(|r| r.peer_id != route.peer_id);
 
-        entry.push(route.clone());
+        let route_arc = Arc::new(route.clone());
+        entry.push(route_arc);
 
         // Sort by metric ascending for this CIDR
         entry.sort_by_key(|r| r.metric);
@@ -102,7 +105,7 @@ impl RouteTable {
         // Check for ECMP: same CIDR, same metric, different peers
         if entry.len() > 1 {
             let min_metric = entry[0].metric;
-            let ecmp_routes: Vec<Route> = entry
+            let ecmp_routes: Vec<Arc<Route>> = entry
                 .iter()
                 .filter(|r| r.metric == min_metric && r.active)
                 .cloned()
@@ -138,20 +141,24 @@ impl RouteTable {
     ///
     /// Returns the best route for the given IP address, or None if no route matches.
     /// Prefers routes with longer prefix (more specific) and lower metric.
-    pub async fn lookup(&self, dst_ip: Ipv4Addr) -> Option<Route> {
+    /// Routes are returned as Arc to avoid cloning on every lookup.
+    pub async fn lookup(&self, dst_ip: Ipv4Addr) -> Option<Arc<Route>> {
         let routes = self.routes.read().await;
 
-        let mut best: Option<Route> = None;
+        let mut best: Option<Arc<Route>> = None;
         let mut best_len: u8 = 0;
 
         for (cidr_str, route_list) in routes.iter() {
-            let cidr: Ipv4Net = cidr_str.parse().ok()?;
+            let cidr: Ipv4Net = match cidr_str.parse() {
+                Ok(c) => c,
+                Err(_) => continue,
+            };
 
             if cidr.contains(&dst_ip) && route_list.iter().any(|r| r.active) {
                 if cidr.prefix_len() > best_len {
                     if let Some(route) = route_list.iter().find(|r| r.active) {
                         best_len = cidr.prefix_len();
-                        best = Some(route.clone());
+                        best = Some(Arc::clone(route));
                     }
                 }
             }
@@ -160,7 +167,7 @@ impl RouteTable {
         if best.is_none() {
             // Fall back to default route
             if let Some(default) = self.default_route.read().await.as_ref() {
-                return Some(default.clone());
+                return Some(Arc::clone(default));
             }
         }
 
@@ -169,7 +176,7 @@ impl RouteTable {
 
     /// Perform ECMP-aware lookup — returns one of the ECMP routes
     /// using round-robin selection.
-    pub async fn lookup_ecmp(&self, dst_ip: Ipv4Addr) -> Option<Route> {
+    pub async fn lookup_ecmp(&self, dst_ip: Ipv4Addr) -> Option<Arc<Route>> {
         let best = self.lookup(dst_ip).await?;
         let cidr_key = best.cidr.to_string();
 
@@ -178,7 +185,7 @@ impl RouteTable {
             if group.routes.len() > 1 {
                 let idx = group.next_idx % group.routes.len();
                 group.next_idx = (group.next_idx + 1) % group.routes.len();
-                return Some(group.routes[idx].clone());
+                return Some(Arc::clone(&group.routes[idx]));
             }
         }
 
@@ -188,7 +195,7 @@ impl RouteTable {
     /// Set the default route (0.0.0.0/0).
     pub async fn set_default_route(&self, route: Route) {
         let mut default = self.default_route.write().await;
-        *default = Some(route);
+        *default = Some(Arc::new(route));
     }
 
     /// Mark a route as inactive (e.g., peer disconnected).
@@ -230,11 +237,15 @@ impl RouteTable {
     }
 
     /// Get all routes (for debugging/CLI).
+    /// Clones each route since this is not a hot path.
     pub async fn get_all_routes(&self) -> Vec<Route> {
         let routes = self.routes.read().await;
-        let mut all: Vec<Route> = routes.values().flat_map(|v| v.iter().cloned()).collect();
+        let mut all: Vec<Route> = routes.values()
+            .flat_map(|v| v.iter())
+            .map(|r| (**r).clone())
+            .collect();
         if let Some(default) = self.default_route.read().await.as_ref() {
-            all.push(default.clone());
+            all.push((**default).clone());
         }
         all
     }
@@ -278,7 +289,7 @@ mod tests {
 
         let result = table.lookup(Ipv4Addr::from_str("100.64.1.42").unwrap()).await;
         assert!(result.is_some());
-        assert_eq!(result.unwrap().peer_id, "peer1");
+        assert_eq!(result.unwrap().peer_id, "peer1".to_string());
     }
 
     #[tokio::test]

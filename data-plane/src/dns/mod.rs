@@ -138,7 +138,7 @@ impl MeshDns {
                 hostname.to_string(),
                 CacheEntry {
                     ip,
-                    expires_at: Some(Instant::now() + Duration::from_secs(300)), // 5 min TTL
+                    expires_at: Instant::now() + Duration::from_secs(300), // 5 min TTL
                 },
             );
         }

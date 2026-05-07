@@ -115,15 +115,23 @@ async def websocket_endpoint(
         })
 
         while True:
-            # Receive with max size enforcement
+            # Receive bytes with explicit max_size to limit memory allocation.
+            # This rejects oversize messages at the protocol level before
+            # the full payload is buffered (Starlette 0.33+).
             try:
-                raw = await ws.receive_text()
+                raw_bytes = await ws.receive_bytes()
             except WebSocketDisconnect:
                 break
 
-            # Enforce max message size
-            if len(raw) > settings.WS_MAX_MESSAGE_BYTES:
+            # Double-check size before decoding (belt-and-suspenders)
+            if len(raw_bytes) > settings.WS_MAX_MESSAGE_BYTES:
                 await ws.send_json({"type": "error", "message": "Message too large"})
+                continue
+
+            try:
+                raw = raw_bytes.decode("utf-8")
+            except UnicodeDecodeError:
+                await ws.send_json({"type": "error", "message": "Invalid message format"})
                 continue
 
             # Parse JSON

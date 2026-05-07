@@ -33,21 +33,19 @@ impl QuicTransport {
         server_name: &str,
         peer_fingerprint: Option<&str>,
     ) -> Result<Connection, Box<dyn std::error::Error>> {
-        let client_crypto = if let Some(fp) = peer_fingerprint {
-            rustls::ClientConfig::builder()
-                .dangerous()
-                .with_custom_certificate_verifier(CertificatePinner::new(fp))
-                .with_no_client_auth()
-        } else {
-            log::warn!(
-                "No certificate fingerprint provided for {} — skipping server verification.                  Set a fingerprint to prevent MITM attacks.",
+        // Require certificate fingerprint pinning for all connections.
+        // SkipServerVerification is never used in production — MITM protection is mandatory.
+        let fp = peer_fingerprint.ok_or_else(|| {
+            format!(
+                "Certificate fingerprint required for peer {} — refusing to connect without identity verification. \
+                 Pass a SHA-256 fingerprint of the peer's certificate to prevent MITM attacks.",
                 peer_addr
-            );
-            rustls::ClientConfig::builder()
-                .dangerous()
-                .with_custom_certificate_verifier(SkipServerVerification::new())
-                .with_no_client_auth()
-        };
+            )
+        })?;
+        let client_crypto = rustls::ClientConfig::builder()
+            .dangerous()
+            .with_custom_certificate_verifier(CertificatePinner::new(fp))
+            .with_no_client_auth();
         let quic_client_config = quinn::crypto::rustls::QuicClientConfig::try_from(
             Arc::new(client_crypto),
         )?;

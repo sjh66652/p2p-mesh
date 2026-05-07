@@ -13,8 +13,8 @@ def _require_env(key: str) -> str:
     value = os.getenv(key, "")
     if not value:
         raise RuntimeError(
-            f"CRITICAL: Environment variable {key} is not set. "
-            f"In production, all secrets MUST be provided via environment."
+            "A required configuration value is missing. "
+            "Please ensure all required environment variables are set."
         )
     return value
 

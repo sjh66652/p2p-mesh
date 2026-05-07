@@ -91,7 +91,7 @@ async def report_traffic_batch(
     for report in data.reports:
         _validate_traffic_report(report)
 
-        # Verify device belongs to user
+        # Verify source device belongs to user
         result = await db.execute(
             select(Device).where(Device.id == report.device_id, Device.user_id == user.id)
         )
@@ -100,6 +100,17 @@ async def report_traffic_batch(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Device {report.device_id} not found or does not belong to you",
             )
+
+        # Verify peer device also belongs to the same user (prevents cross-user billing fraud)
+        if report.peer_device_id:
+            peer_result = await db.execute(
+                select(Device).where(Device.id == report.peer_device_id, Device.user_id == user.id)
+            )
+            if not peer_result.scalar_one_or_none():
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail=f"Peer device {report.peer_device_id} not found or does not belong to you",
+                )
 
         await billing_service.report_traffic(
             db,

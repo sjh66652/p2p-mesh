@@ -91,4 +91,27 @@ jni = { version = "0.21", optional = true }
 
 [features]
 default = []
-# Enable Android JNI 
+# Enable Android JNI bindings for mobile mesh client
+jni = ["dep:jni"]
+# Enable DPDK userspace networking (requires libdpdk-dev)
+dpdk = []
+# Enable io_uring async I/O (requires Linux 5.1+)
+io-uring = []
+# Enable post-quantum cryptography
+pqc = []
+
+[[bin]]
+name = "mesh-tunnel"
+path = "src/bin/mesh-tunnel.rs"
+
+[[bin]]
+name = "mesh-relay"
+path = "src/bin/mesh-relay.rs"
+
+[[bin]]
+name = "mesh-stun"
+path = "src/bin/mesh-stun.rs"
+
+[[bin]]
+name = "mesh-overlay"
+path = "src/bin/mesh-overlay.rs"

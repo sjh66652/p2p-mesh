@@ -70,7 +70,10 @@ async def register_relay(
 ):
     """Register a new relay node (admin only). Rate-limited per admin IP."""
     # Rate limit relay registration by admin IP
-    admin_ip = request.client.host if request.client else "unknown"
+    admin_ip = (
+        request.headers.get("X-Real-IP")
+        or (request.client.host if request.client else "unknown")
+    )
     reg_key = f"relay_reg_rate:{admin_ip}"
     reg_count = await redis_client.incr(reg_key)
     if reg_count == 1:
@@ -188,9 +191,10 @@ async def delete_relay(
 @router.get("/best")
 async def get_best_relay(
     region: str | None = Query(None),
+    user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Get the best available relay node for a region."""
+    """Get the best available relay node for a region (authenticated users only)."""
     relay = await relay_service.select_best_relay(db, region=region)
     if relay is None:
         raise HTTPException(

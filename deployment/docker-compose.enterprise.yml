@@ -3,16 +3,17 @@
 #
 # Prerequisites: docker-compose >= 1.29, 16GB+ RAM recommended
 
-version: "3.9"
+
 
 services:
   # ---- PostgreSQL HA with Patroni ----
   etcd:
     image: bitnami/etcd:3.5
     environment:
-      - ALLOW_NONE_AUTHENTICATION=yes
+      - ALLOW_NONE_AUTHENTICATION=no
+      - ETCD_ROOT_PASSWORD=${ETCD_ROOT_PASSWORD:-CHANGE_ME_ETCD_PASSWORD}
       - ETCD_ADVERTISE_CLIENT_URLS=http://etcd:2379
-      - ETCD_LISTEN_CLIENT_URLS=http://0.0.0.0:2379
+      - ETCD_LISTEN_CLIENT_URLS=http://etcd:2379
     networks:
       - mesh-internal
     restart: unless-stopped

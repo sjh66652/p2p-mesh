@@ -83,7 +83,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let virtual_ip = ipam.request_ip(&cli.device_id).await?;
     log::info!("Assigned overlay IP: {}", virtual_ip);
 
-    // ---- 2. TUN Interface ----
+    // ---- 2. TUN Interface + Route Table + Tunnel Manager ----
+    // All components are created once and passed to the overlay.
     let tun = TunInterface::new(
         &virtual_ip.to_string(),
         "255.192.0.0", // /10 netmask
@@ -91,10 +92,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     )?;
     log::info!("TUN interface {} created with IP {}", tun.name(), virtual_ip);
 
-    // ---- 3. Route Table ----
-    let route_table = Arc::new(RouteTable::new());
+    let route_table = RouteTable::new();
 
-    // Add direct route for our own subnet
+    let socket = Arc::new(tokio::net::UdpSocket::bind("0.0.0.0:0").await?);
+    log::info!("Data plane socket bound to {}", socket.local_addr()?);
+
+    let tunnel_manager = TunnelManager::new(socket.clone());
+
+    // ---- 3. Overlay Network (owns TUN, RouteTable, TunnelManager) ----
+    let mut overlay = OverlayNetwork::new(
+        tun,
+        route_table,
+        tunnel_manager,
+        virtual_ip,
+        cli.device_id.clone(),
+    );
+
+    // Add direct route for our own subnet (after overlay creation — uses overlay's route table)
     let prefix: ipnet::Ipv4Net = format!("{}/10", OVERLAY_PREFIX).parse()?;
     let self_route = Route {
         cidr: prefix,
@@ -106,7 +120,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         added_at: std::time::Instant::now(),
         last_used: None,
     };
-    route_table.add_route(self_route).await;
+    overlay.add_route(self_route).await;
 
     // ---- 4. ACL Engine ----
     let acl = Arc::new(AclEngine::new());
@@ -129,45 +143,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let ice = Arc::new(IceAgent::new());
     let (ufrag, pwd) = ice.get_local_credentials();
     log::info!("ICE credentials: ufrag={}, pwd={}...", ufrag, &pwd[..8]);
-
-    // ---- 7. Tunnel Manager ----
-    let socket = Arc::new(tokio::net::UdpSocket::bind("0.0.0.0:0").await?);
-    let tunnel_manager = Arc::new(tokio::sync::Mutex::new(
-        TunnelManager::new(socket.clone())
-    ));
-    log::info!("Data plane socket bound to {}", socket.local_addr()?);
-
-    // ---- 8. Overlay Network ----
-    let mut overlay = OverlayNetwork::new(
-        // We need to work around TunInterface being moved.
-        // In production, TunInterface is wrapped in Arc.
-        // For the binary, create a second instance or wrap properly.
-        {
-            TunInterface::new(
-                &virtual_ip.to_string(),
-                "255.192.0.0",
-                cli.mtu,
-            )?
-        },
-        // RouteTable::new() won't work because we already added routes to `route_table`
-        // In production, the overlay network holds Arc<RouteTable>
-        // For now, register peer routes via the route_table Arc
-        // The overlay object is a coordinator, not the only owner of route_table
-        {
-            // Re-use the same route table pattern
-            // In a real deployment, the overlay would take ownership of the Arc
-            route_table.clone(); // placeholder
-            RouteTable::new()
-        },
-        {
-            // Similarly for tunnel_manager — in production this is Arc<Mutex<...>>
-            // This is a known limitation of the current binary structure
-            // Future: use workspace-level singleton or dependency injection
-            TunnelManager::new(socket.clone())
-        },
-        virtual_ip,
-        cli.device_id.clone(),
-    );
 
     // Start the overlay packet processing
     overlay.start_processing();

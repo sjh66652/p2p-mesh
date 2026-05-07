@@ -65,17 +65,25 @@ p2p-mesh/
 │   ├── Cargo.toml
 │   └── src/
 │       ├── bin/
+│       │   ├── mesh-overlay.rs         # Overlay mesh node (TUN + Noise IK + ICE)
 │       │   ├── mesh-stun.rs            # STUN server (UDP 3478)
 │       │   ├── mesh-tunnel.rs          # P2P tunnel client endpoint
 │       │   └── mesh-relay.rs           # Relay forwarding node
+│       ├── crypto/noise.rs             # Noise IK handshake (X25519 + ChaCha20-Poly1305)
 │       ├── crypto/mod.rs               # ChaCha20-Poly1305 AEAD
-│       ├── stun/mod.rs                 # STUN client + NAT classification
+│       ├── stun/mod.rs                 # STUN client + NAT classification (RFC 5780)
+│       ├── ice/mod.rs                  # ICE agent (RFC 8445): connectivity checks, role conflict
+│       ├── router/mod.rs               # LPM route table with Arc<Route> + ECMP
+│       ├── overlay/mod.rs              # TUN device + IPAM + ACL + route integration
+│       ├── ipam/mod.rs                 # 100.64.0.0/10 CGNAT address management
+│       ├── acl/mod.rs                  # Per-peer access control rules
+│       ├── dns/mod.rs                  # Split-horizon DNS resolver
 │       ├── puncher/mod.rs              # UDP hole punching (HELLO/ACK)
 │       ├── tunnel/mod.rs               # P2P tunnel management
 │       ├── quic/mod.rs                 # QUIC transport (quinn + rustls)
 │       ├── multipath/mod.rs            # Multi-path routing (Direct/Relay)
 │       ├── metrics/mod.rs              # EWMA network quality metrics
-│       ├── relay/mod.rs                # Zero-trust relay forwarding
+│       ├── relay/mod.rs                # Zero-trust relay forwarding (HMAC key zeroized on drop)
 │       └── lib.rs                      # Public module declarations
 ├── deployment/
 │   ├── docker-compose.microservices.yml    # 12-container dev stack
@@ -223,6 +231,7 @@ curl -X POST http://localhost/api/v1/devices \
 |--------|------|------|-------------|
 | POST | `/relay/register` | Admin | Register relay node |
 | GET | `/relay` | JWT | List relay nodes |
+| GET | `/relay/best` | JWT | Get best relay for region (authenticated) |
 | POST | `/relay/{id}/heartbeat` | Internal/Admin | Relay heartbeat |
 | DELETE | `/relay/{id}` | Admin | Delete relay node |
 | POST | `/traffic/report` | JWT | Submit traffic report |
@@ -269,11 +278,22 @@ The data plane implements a complete, security-hardened NAT traversal stack:
 |---------|---------------|---------|
 | **Transport** | QUIC (RFC 9000) via quinn 0.11 | TLS 1.3, 0-RTT, multiplexed streams, connection migration, SHA-256 cert pinning |
 | **Encryption** | ChaCha20-Poly1305 AEAD | Data plane traffic never decrypted by control plane |
-| **Key Exchange** | X25519 ECDH | HKDF domain-separated session key derivation |
+| **Key Exchange** | Noise IK + X25519 ECDH | Noise Protocol Framework IK handshake (0-RTT, mutual auth, forward secrecy); HKDF domain-separated session key derivation |
 | **Multi-Path** | Direct / Relay / Local | Auto-selects best path based on RTT, loss, bandwidth |
 | **Quality Metrics** | EWMA-smoothed | RTT (microsecond precision), loss rate %, bandwidth bps |
-| **Relay Auth** | HMAC-SHA256 | Source device ID authentication, per-device + per-IP rate limiting |
+| **Relay Auth** | HMAC-SHA256 | Source device ID authentication, per-device + per-IP rate limiting; HMAC key zeroized on drop |
 | **Punch Auth** | HMAC-SHA256 | HELLO/HELLO_ACK packet authentication, 10-candidate limit, 500-packet budget |
+
+### Overlay Network (Phase 3)
+
+| Feature | Implementation | Details |
+|---------|---------------|---------|
+| **Handshake** | Noise IK (Noise Protocol Framework) | 0-RTT encryption, mutual X25519 auth, forward secrecy; full initiator+responder state machine |
+| **ICE** | RFC 8445 Connectivity Checks | Candidate gathering (host/srflx/relay), pair prioritization, role conflict resolution, consent freshness (RFC 7675); lock-phased to avoid async hold |
+| **NAT Classification** | RFC 3489 / RFC 5780 | Multi-server STUN probes; Symmetric/Full-Cone heuristics with documented limitations |
+| **Routing** | LPM + ECMP via Arc<Route> | Longest Prefix Match with CIDR trie; Equal-Cost Multi-Path round-robin; zero-clone hot-path lookups |
+| **Overlay** | TUN device + IPAM + ACL | WireGuard-like TUN interface, 100.64.0.0/10 CGNAT space, per-peer ACL rules |
+| **DNS** | Split-horizon resolver | Mesh-local names via hosts table, upstream bypass for non-mesh domains |
 
 ### Path Selection Strategy
 
@@ -286,7 +306,7 @@ Direct P2P (preferred)  →  Relay (fallback)  →  None (unreachable)
 
 ## Security
 
-Defense-in-depth across every layer. Comprehensive audit (May 2026): 71 findings identified, 55 patched.
+Defense-in-depth across every layer. Comprehensive audit (May 2026): 71 findings identified, 55+ patched across 3 phases (all Critical, High, and Medium severity resolved).
 
 - **Transport**: Nginx enforces TLS 1.2+, HSTS headers
 - **Authentication**: JWT (HS256) with jti-based precise revocation, device-session isolation, bcrypt (rounds=12)
@@ -296,14 +316,19 @@ Defense-in-depth across every layer. Comprehensive audit (May 2026): 71 findings
 - **Audit logging**: All auth events logged; email addresses SHA-256 hashed with JWT secret to prevent PII leakage
 - **Inter-service**: Shared `INTERNAL_API_KEY` header for service-to-service calls
 - **Data plane**: ChaCha20-Poly1305 AEAD, keys never touch the server
+- **Noise IK handshake**: Full initiator+responder state machine with 0-RTT encryption, mutual X25519 auth, forward secrecy
 - **ECDH key exchange**: X25519 elliptic-curve Diffie-Hellman with HKDF domain separation
 - **Certificate pinning**: QUIC clients verify server certificates against SHA-256 fingerprints (prevents MITM)
 - **Punch authentication**: HMAC-SHA256 on all HELLO/HELLO_ACK packets, prevents unauthorized NAT traversal
 - **Candidate limits**: Max 10 peer candidates per punch session, 500 total punch packets (DoS prevention)
 - **Address validation**: Rejects multicast, broadcast, unspecified, and loopback targets
-- **Zero-trust relay**: Relay nodes forward encrypted packets without decryption
+- **Zero-trust relay**: Relay nodes forward encrypted packets without decryption; HMAC key zeroized on drop
 - **Relay HMAC**: Enforced via `RELAY_HMAC_KEY` env var (no hardcoded fallbacks)
 - **Rate limiting**: Nginx layer + Redis sliding window (multi-replica safe), per-device + per-IP relay limits
+- **ICE lock safety**: No write locks held across await points (prevents deadlocks in connectivity checks)
+- **Route lookups**: Arc<Route> zero-copy returns on hot path; ECMP round-robin distribution
+- **WebSocket hardening**: receive_bytes() with immediate size enforcement before UTF-8 decode
+- **Error sanitization**: All _require_env errors use generic messages (no config structure leakage)
 - **Input validation**: Pydantic schemas, SQLAlchemy ORM (no raw SQL), 1MB body limit
 - **Container security**: Non-root user (`USER mesh`), minimal base images, pinned image digests
 - **Dependency scanning**: `bandit`, `pip-audit`, `cargo audit` in CI (no `|| true` bypass)
@@ -416,6 +441,29 @@ GitHub Actions workflow (`.github/workflows/deploy.yml`) builds all 6 services i
 - Runs `bandit` (Python SAST), `pip-audit` (dependency CVE scan)
 - Runs `cargo audit` and `cargo clippy` on Rust data plane
 - Manual approval gate before production deploy
+
+## Recent Changes
+
+### May 7, 2026 — Phase 3 Security Audit (18 fixes)
+
+**Rust data-plane (5):**
+- ForwardingTable HMAC key zeroized on drop (manual `Drop` impl)
+- Full Noise IK handshake: responder-side flow + bidirectional integration test
+- ICE lock restructuring: no write locks held across await points
+- NAT classification improved per RFC 5780 (Symmetric/Unknown heuristics)
+- RouteTable migrated to `Arc<Route>` for zero-clone hot-path lookups
+
+**Python microservices (10):**
+- CORS: explicit origins instead of wildcard+credentials (auth-service, user-service)
+- TrustedHostMiddleware added to signaling-service and relay-service
+- `/relay/best` endpoint now requires authentication
+- WebSocket message size enforced at `receive_bytes()` level before UTF-8 decode
+- `_require_env` error messages sanitized across all 5 config files
+- Docker Compose deprecated `version` strings removed (3 yml files)
+
+**Verification report:** [VERIFICATION-2026-05-07.md](./VERIFICATION-2026-05-07.md)
+
+See [SECURITY.md](./SECURITY.md) for full audit history.
 
 ---
 
