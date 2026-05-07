@@ -247,7 +247,6 @@ impl BabelProtocol {
             // Remove routes from this originator
             prefix_routes.retain(|r| r.router_id != msg.router_id);
             let is_empty = prefix_routes.is_empty();
-            drop(prefix_routes);
             drop(routes);
             // If all routes for this prefix are gone, remove from selected table
             if is_empty {
