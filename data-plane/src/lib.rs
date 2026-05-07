@@ -37,6 +37,7 @@
 // Crate-level lint configuration
 #![allow(dead_code)]
 #![allow(clippy::new_without_default)]
+#![allow(clippy::not_unsafe_ptr_arg_deref)]
 
 // Core (Phase 1)
 pub mod crypto;
