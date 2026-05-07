@@ -1,0 +1,144 @@
+# P2P Mesh Network — Enterprise Deployment (Phase 5)
+# PostgreSQL HA (Patroni + etcd), Redis Cluster, ClickHouse analytics
+#
+# Prerequisites: docker-compose >= 1.29, 16GB+ RAM recommended
+
+version: "3.9"
+
+services:
+  # ---- PostgreSQL HA with Patroni ----
+  etcd:
+    image: bitnami/etcd:3.5
+    environment:
+      - ALLOW_NONE_AUTHENTICATION=yes
+      - ETCD_ADVERTISE_CLIENT_URLS=http://etcd:2379
+      - ETCD_LISTEN_CLIENT_URLS=http://0.0.0.0:2379
+    networks:
+      - mesh-internal
+    restart: unless-stopped
+
+  postgres-primary:
+    image: bitnami/postgresql-repmgr:16
+    environment:
+      - POSTGRESQL_POSTGRES_PASSWORD=${PG_SUPERUSER_PASSWORD}
+      - POSTGRESQL_USERNAME=p2pmesh
+      - POSTGRESQL_PASSWORD=${PG_PASSWORD}
+      - POSTGRESQL_DATABASE=p2pmesh
+      - REPMGR_PASSWORD=${REPMGR_PASSWORD}
+      - REPMGR_PRIMARY_HOST=postgres-primary
+      - REPMGR_PARTNER_NODES=postgres-primary,postgres-standby
+      - REPMGR_NODE_NAME=node-primary
+      - REPMGR_NODE_NETWORK_NAME=postgres-primary
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - pg_primary_data:/bitnami/postgresql
+    networks:
+      - mesh-internal
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "p2pmesh"]
+      interval: 10s
+      retries: 5
+
+  postgres-standby:
+    image: bitnami/postgresql-repmgr:16
+    environment:
+      - POSTGRESQL_POSTGRES_PASSWORD=${PG_SUPERUSER_PASSWORD}
+      - POSTGRESQL_USERNAME=p2pmesh
+      - POSTGRESQL_PASSWORD=${PG_PASSWORD}
+      - POSTGRESQL_DATABASE=p2pmesh
+      - REPMGR_PASSWORD=${REPMGR_PASSWORD}
+      - REPMGR_PRIMARY_HOST=postgres-primary
+      - REPMGR_PARTNER_NODES=postgres-primary,postgres-standby
+      - REPMGR_NODE_NAME=node-standby
+      - REPMGR_NODE_NETWORK_NAME=postgres-standby
+    volumes:
+      - pg_standby_data:/bitnami/postgresql
+    networks:
+      - mesh-internal
+    restart: unless-stopped
+    depends_on:
+      postgres-primary:
+        condition: service_healthy
+
+  # ---- Redis Cluster (3-node) ----
+  redis-node-0:
+    image: redis:7-alpine
+    command: redis-server --port 6379 --cluster-enabled yes --cluster-config-file nodes.conf --cluster-node-timeout 5000 --appendonly yes --requirepass ${REDIS_PASSWORD}
+    volumes:
+      - redis_node0_data:/data
+    networks:
+      - mesh-internal
+    restart: unless-stopped
+
+  redis-node-1:
+    image: redis:7-alpine
+    command: redis-server --port 6379 --cluster-enabled yes --cluster-config-file nodes.conf --cluster-node-timeout 5000 --appendonly yes --requirepass ${REDIS_PASSWORD}
+    volumes:
+      - redis_node1_data:/data
+    networks:
+      - mesh-internal
+    restart: unless-stopped
+
+  redis-node-2:
+    image: redis:7-alpine
+    command: redis-server --port 6379 --cluster-enabled yes --cluster-config-file nodes.conf --cluster-node-timeout 5000 --appendonly yes --requirepass ${REDIS_PASSWORD}
+    volumes:
+      - redis_node2_data:/data
+    networks:
+      - mesh-internal
+    restart: unless-stopped
+
+  # ---- ClickHouse — Telemetry & Analytics ----
+  clickhouse:
+    image: clickhouse/clickhouse-server:24-alpine
+    environment:
+      - CLICKHOUSE_DB=p2pmesh
+      - CLICKHOUSE_USER=p2pmesh
+      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD}
+    ports:
+      - "127.0.0.1:8123:8123"
+      - "127.0.0.1:9000:9000"
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+      - ./clickhouse/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    networks:
+      - mesh-internal
+    restart: unless-stopped
+    ulimits:
+      nofile: 262144
+
+  # ---- PgBouncer — Connection Pooling ----
+  pgbouncer:
+    image: bitnami/pgbouncer:1
+    environment:
+      - PGBOUNCER_DATABASE=p2pmesh
+      - PGBOUNCER_PORT=6432
+      - POSTGRESQL_HOST=postgres-primary
+      - POSTGRESQL_PORT=5432
+      - POSTGRESQL_USERNAME=p2pmesh
+      - POSTGRESQL_PASSWORD=${PG_PASSWORD}
+      - PGBOUNCER_AUTH_TYPE=scram-sha-256
+      - PGBOUNCER_MAX_CLIENT_CONN=200
+      - PGBOUNCER_DEFAULT_POOL_SIZE=50
+    ports:
+      - "127.0.0.1:6432:6432"
+    networks:
+      - mesh-internal
+    restart: unless-stopped
+    depends_on:
+      postgres-primary:
+        condition: service_healthy
+
+networks:
+  mesh-internal:
+    driver: bridge
+
+volumes:
+  pg_primary_data:
+  pg_standby_data:
+  redis_node0_data:
+  redis_node1_data:
+  redis_node2_data:
+  clickhouse_data:

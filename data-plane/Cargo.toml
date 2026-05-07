@@ -2,7 +2,7 @@
 name = "p2p-mesh-dataplane"
 version = "2.0.0"
 edition = "2021"
-description = "High-performance Overlay Mesh Network data plane — TUN, routing, IPAM, ACL, ICE/TURN, QUIC"
+description = "P2P Mesh Network — Production-grade overlay mesh platform with TUN routing, IPAM, ACL, ICE/TURN, QUIC, eBPF, DPDK, io_uring, Post-Quantum Crypto, and AI-powered routing (Phases 1-10)"
 
 [dependencies]
 # Async runtime
@@ -86,18 +86,9 @@ async-trait = "0.1"
 # IP address utilities
 ipnetwork = "0.20"
 
-[[bin]]
-name = "mesh-tunnel"
-path = "src/bin/mesh-tunnel.rs"
+# Optional: Android JNI bindings for mobile module (Phase 7)
+jni = { version = "0.21", optional = true }
 
-[[bin]]
-name = "mesh-relay"
-path = "src/bin/mesh-relay.rs"
-
-[[bin]]
-name = "mesh-stun"
-path = "src/bin/mesh-stun.rs"
-
-[[bin]]
-name = "mesh-overlay"
-path = "src/bin/mesh-overlay.rs"
+[features]
+default = []
+# Enable Android JNI 
