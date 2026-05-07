@@ -34,7 +34,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 
 /// Policy enforcement mode.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum PolicyMode {
     /// Allow all traffic by default, deny only what rules specify

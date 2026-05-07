@@ -762,7 +762,6 @@ mod tests {
         let local = PqcCapabilities { min_security_level: 5, ..PqcCapabilities::default() };
 
         let remote = PqcCapabilities { kems: vec![PqcAlgorithm::MlKem512], min_security_level: 1, ..PqcCapabilities::default() };
-        remote.min_security_level = 1;
 
         let result = negotiate_pqc(&local, &remote);
         assert!(result.is_none());
