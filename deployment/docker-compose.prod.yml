@@ -206,16 +206,19 @@ services:
       - "51821:51821/udp"
     environment:
       - API_URL=http://api:8000
-      - RELAY_AUTH_TOKEN=${RELAY_AUTH_TOKEN}
+      - RELAY_AUTH_TOKEN=${RELAY_AUTH_TOKEN:?RELAY_AUTH_TOKEN is required}
       - RELAY_ID=${RELAY_ID:-relay-primary}
       - REGION=${RELAY_REGION:-default}
       - RELAY_PORT=51821
       - HEARTBEAT_INTERVAL=30
     depends_on:
-      - api
+      api:
+        condition: service_healthy
     restart: unless-stopped
     networks:
       - mesh-net
+    security_opt:
+      - no-new-privileges:true
     deploy:
       resources:
         limits:
@@ -237,9 +240,12 @@ services:
       - '--config.file=/etc/prometheus/prometheus.yml'
       - '--storage.tsdb.path=/prometheus'
       - '--storage.tsdb.retention.time=30d'
+      - '--web.external-url=http://localhost:9090'
     restart: unless-stopped
     networks:
       - mesh-net
+    security_opt:
+      - no-new-privileges:true
     logging:
       driver: "json-file"
       options:
@@ -250,9 +256,9 @@ services:
   grafana:
     image: grafana/grafana:11.3.0
     environment:
-      - GF_SECURITY_ADMIN_USER=${GRAFANA_USER:-admin}
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_USER:?GRAFANA_USER is required}
       # If empty, Grafana won't start (enforced for security)
-      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:?GRAFANA_PASSWORD is required}
       - GF_AUTH_ANONYMOUS_ENABLED=false
       - GF_SERVER_ROOT_URL=https://monitor.yourdomain.com
     volumes:

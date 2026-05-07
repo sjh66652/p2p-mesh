@@ -147,26 +147,25 @@ impl RouteTable {
     /// Prefers routes with longer prefix (more specific) and lower metric.
     /// Routes are returned as Arc to avoid cloning on every lookup.
     pub async fn lookup(&self, dst_ip: Ipv4Addr) -> Option<Arc<Route>> {
-        let routes = self.routes.read().await;
-
         let mut best: Option<Arc<Route>> = None;
         let mut best_len: u8 = 0;
-
-        for (cidr_str, route_list) in routes.iter() {
-            let cidr: Ipv4Net = match cidr_str.parse() {
-                Ok(c) => c,
-                Err(_) => continue,
-            };
-
-            if cidr.contains(&dst_ip) && route_list.iter().any(|r| r.active) {
-                if cidr.prefix_len() > best_len {
-                    if let Some(route) = route_list.iter().find(|r| r.active) {
-                        best_len = cidr.prefix_len();
-                        best = Some(Arc::clone(route));
+        {
+            let routes = self.routes.read().await;
+            for (cidr_str, route_list) in routes.iter() {
+                let cidr: Ipv4Net = match cidr_str.parse() {
+                    Ok(c) => c,
+                    Err(_) => continue,
+                };
+                if cidr.contains(&dst_ip) && route_list.iter().any(|r| r.active) {
+                    if cidr.prefix_len() > best_len {
+                        if let Some(route) = route_list.iter().find(|r| r.active) {
+                            best_len = cidr.prefix_len();
+                            best = Some(Arc::clone(route));
+                        }
                     }
                 }
             }
-        }
+        } // Release routes read lock before accessing default_route
 
         if best.is_none() {
             // Fall back to default route
@@ -184,6 +183,9 @@ impl RouteTable {
         let best = self.lookup(dst_ip).await?;
         let cidr_key = best.cidr.to_string();
 
+        // Acquire ecmp lock AFTER lookup() completes and routes lock is released,
+        // avoiding lock ordering deadlock (ecmp.write after routes.read is safe;
+        // routes.read after ecmp.write would deadlock)
         let mut ecmp = self.ecmp.write().await;
         if let Some(group) = ecmp.get_mut(&cidr_key) {
             if group.routes.len() > 1 {

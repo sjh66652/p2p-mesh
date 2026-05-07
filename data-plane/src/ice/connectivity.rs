@@ -101,6 +101,7 @@ impl PeerConnectivity {
 
     /// Record a successful connectivity check with RTT measurement.
     pub fn record_success(&mut self, rtt_us: u64) {
+        self.probes_sent += 1;
         self.successful_checks += 1;
         self.failed_checks = 0;
         self.last_success = Some(Instant::now());
@@ -262,20 +263,17 @@ impl ConnectivityManager {
                 Ok(_) => {
                     let mut peers = self.peers.write().await;
                     if let Some(peer) = peers.get_mut(peer_id) {
-                        peer.probes_sent += 1;
-
                         // Wait for response with adaptive timeout
+                        // probes_sent is incremented by record_success or record_failure below
                         let timeout = peer.rtt_timeout().max(Duration::from_secs(1));
                         let mut buf = [0u8; 1500];
+                        let send_time = Instant::now();
 
                         match tokio::time::timeout(timeout, socket.recv_from(&mut buf)).await {
                             Ok(Ok((n, _src))) => {
-                                let _start = peer.last_success.map(|t| t.elapsed());
                                 // Verify it's a STUN Binding Success Response
                                 if n >= 20 && buf[0] == 0x01 && buf[1] == 0x01 {
-                                    let rtt = Instant::now().duration_since(
-                                        peer.last_success.unwrap_or(Instant::now()),
-                                    );
+                                    let rtt = send_time.elapsed();
                                     peer.record_success(rtt.as_micros() as u64);
                                     log::trace!("Connectivity check OK for {}: RTT={}μs", peer_id, peer.srtt_us);
                                 }

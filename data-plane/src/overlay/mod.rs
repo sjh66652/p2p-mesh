@@ -155,24 +155,26 @@ impl OverlayNetwork {
     /// Start the main overlay packet processing loop.
     ///
     /// This runs two concurrent tasks:
-    /// 1. Read from TUN → route → send to peer
-    /// 2. Read from tunnel → inject into TUN
+    /// 1. Read from TUN → route → send to peer (outbound)
+    /// 2. Read from tunnel → decrypt → inject into TUN (inbound)
     pub fn start_processing(&mut self) {
-        let tun = self.tun.clone();
+        let tun_out = self.tun.clone();
+        let tun_in = self.tun.clone();
         let route_table = self.route_table.clone();
-        let tunnel_manager = self.tunnel_manager.clone();
+        let tunnel_manager_out = self.tunnel_manager.clone();
+        let tunnel_manager_in = self.tunnel_manager.clone();
 
-        let handle = tokio::spawn(async move {
-            let mut buf = vec![0u8; 65536];
+        // Outbound task: TUN → route table → tunnel
+        let out_handle = tokio::spawn(async move {
             loop {
-                // Poll TUN for outbound packets
-                match tun.read_packet().await {
+                match tun_out.read_packet().await {
                     Ok(packet) => {
                         if let Some(dst_ip) = extract_dst_ip(&packet) {
                             match route_table.lookup(dst_ip).await {
                                 Some(route) => {
-                                    let tunnels = tunnel_manager.lock().await;
+                                    let tunnels = tunnel_manager_out.lock().await;
                                     let _ = tunnels.send_to(&route.peer_id, &packet).await;
+                                    drop(tunnels);
                                 }
                                 None => {
                                     log::trace!("No route for destination IP {}", dst_ip);
@@ -188,7 +190,28 @@ impl OverlayNetwork {
             }
         });
 
-        self.process_handle = Some(handle);
+        // Inbound task: tunnel → decrypt → TUN
+        tokio::spawn(async move {
+            loop {
+                let (peer_id, packet) = {
+                    let tunnels = tunnel_manager_in.lock().await;
+                    match tunnels.recv_from().await {
+                        Some(result) => result,
+                        None => {
+                            drop(tunnels);
+                            tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+                            continue;
+                        }
+                    }
+                };
+                log::trace!("Received inbound packet from {}", peer_id);
+                if let Err(e) = tun_in.write_packet(&packet).await {
+                    log::error!("TUN write error (inbound from {}): {}", peer_id, e);
+                }
+            }
+        });
+
+        self.process_handle = Some(out_handle);
     }
 
     /// Get our virtual IP on the overlay.

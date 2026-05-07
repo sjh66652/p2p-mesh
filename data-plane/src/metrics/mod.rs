@@ -40,7 +40,7 @@ impl Default for PathMetrics {
     fn default() -> Self {
         Self {
             rtt_avg: Duration::from_secs(0),
-            rtt_min: Duration::from_secs(10), // unreasonable large for min
+            rtt_min: Duration::MAX,
             rtt_max: Duration::from_secs(0),
             rtt_samples: 0,
             loss_rate: 0.0,

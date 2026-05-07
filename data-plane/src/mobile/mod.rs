@@ -21,6 +21,7 @@
 
 use std::ffi::CStr;
 use std::os::raw::c_char;
+use std::sync::OnceLock;
 
 /// Mobile platform type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -183,6 +184,16 @@ pub enum MobileError {
 // C FFI for iOS (exported via cbindgen)
 // =====================================================================
 
+/// Global tokio runtime shared across FFI calls.
+/// Created once on first use to avoid the overhead of creating a new runtime
+/// per FFI call (which is expensive and may panic if called from within a tokio context).
+fn get_runtime() -> &'static tokio::runtime::Runtime {
+    static RUNTIME: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
+    RUNTIME.get_or_init(|| {
+        tokio::runtime::Runtime::new().expect("Failed to create tokio runtime for mobile FFI")
+    })
+}
+
 /// Initialize the mobile mesh from C/Swift.
 #[no_mangle]
 pub extern "C" fn mobile_mesh_init(
@@ -212,8 +223,7 @@ pub extern "C" fn mobile_mesh_start(client: *mut MobileMeshClient, tun_fd: i32) 
     let client = unsafe { &*client };
     let tun = if tun_fd >= 0 { Some(tun_fd) } else { None };
 
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    match rt.block_on(client.start(tun)) {
+    match get_runtime().block_on(client.start(tun)) {
         Ok(_) => 0,
         Err(_) => -1,
     }
@@ -223,8 +233,7 @@ pub extern "C" fn mobile_mesh_start(client: *mut MobileMeshClient, tun_fd: i32) 
 #[no_mangle]
 pub extern "C" fn mobile_mesh_stop(client: *mut MobileMeshClient) {
     let client = unsafe { &*client };
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    rt.block_on(client.stop());
+    get_runtime().block_on(client.stop());
 }
 
 /// Free the mobile mesh client.
@@ -277,8 +286,7 @@ pub mod android {
         let client = unsafe { &*(client_ptr as *const MobileMeshClient) };
         let fd = if tun_fd >= 0 { Some(tun_fd) } else { None };
 
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        match rt.block_on(client.start(fd)) {
+        match super::get_runtime().block_on(client.start(fd)) {
             Ok(_) => 0,
             Err(_) => -1,
         }
@@ -291,8 +299,7 @@ pub mod android {
         client_ptr: jlong,
     ) {
         let client = unsafe { &*(client_ptr as *const MobileMeshClient) };
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        rt.block_on(client.stop());
+        super::get_runtime().block_on(client.stop());
     }
 }
 

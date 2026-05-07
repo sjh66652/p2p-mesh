@@ -92,17 +92,33 @@ impl TunInterface {
         #[cfg(target_os = "linux")]
         {
             // Assign IP address (requires iproute2 or netlink)
-            let status = std::process::Command::new("ip")
+            match std::process::Command::new("ip")
                 .args(["addr", "add", &format!("{}/10", address), "dev", &name])
-                .output();
-            if let Err(e) = status {
-                log::warn!("Failed to assign IP to {}: {} (try manual: ip addr add {}/10 dev {})", name, e, address, name);
+                .output()
+            {
+                Ok(output) if !output.status.success() => {
+                    log::warn!("`ip addr add` exited with {} for {}: {}",
+                        output.status, name,
+                        String::from_utf8_lossy(&output.stderr));
+                }
+                Err(e) => {
+                    log::warn!("Failed to assign IP to {}: {} (try manual: ip addr add {}/10 dev {})", name, e, address, name);
+                }
+                _ => {}
             }
-            let status = std::process::Command::new("ip")
+            match std::process::Command::new("ip")
                 .args(["link", "set", "up", &name])
-                .output();
-            if let Err(e) = status {
-                log::warn!("Failed to bring up {}: {}", name, e);
+                .output()
+            {
+                Ok(output) if !output.status.success() => {
+                    log::warn!("`ip link set up` exited with {} for {}: {}",
+                        output.status, name,
+                        String::from_utf8_lossy(&output.stderr));
+                }
+                Err(e) => {
+                    log::warn!("Failed to bring up {}: {}", name, e);
+                }
+                _ => {}
             }
         }
 
@@ -153,6 +169,20 @@ impl TunInterface {
                 Err(e)
             }
             Err(e) => Err(e),
+        }
+    }
+}
+
+impl Drop for TunInterface {
+    fn drop(&mut self) {
+        // Attempt to clean up the TUN device from the OS
+        #[cfg(target_os = "linux")]
+        {
+            let name = self.name.clone();
+            let _ = std::process::Command::new("ip")
+                .args(["link", "delete", &name])
+                .output();
+            log::info!("TUN device {} removed", name);
         }
     }
 }

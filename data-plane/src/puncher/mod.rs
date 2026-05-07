@@ -140,7 +140,8 @@ impl HolePuncher {
     pub fn build_hello(&self, hmac_key: &[u8], device_id: &[u8; 16]) -> Vec<u8> {
         let mut msg = b"HELLO".to_vec();
         msg.extend_from_slice(&hex_encode(&self.our_nonce));
-        let hmac_tag = compute_punch_hmac(hmac_key, device_id, b"HELLO", &self.our_nonce);
+        let hmac_tag = compute_punch_hmac(hmac_key, device_id, b"HELLO", &self.our_nonce)
+            .unwrap_or_default();
         msg.extend_from_slice(&hmac_tag);
         msg
     }
@@ -149,7 +150,8 @@ impl HolePuncher {
     pub fn build_hello_ack(&self, peer_nonce: &[u8; 10], hmac_key: &[u8], device_id: &[u8; 16]) -> Vec<u8> {
         let mut msg = b"HELLO_ACK".to_vec();
         msg.extend_from_slice(&hex_encode(peer_nonce));
-        let hmac_tag = compute_punch_hmac(hmac_key, device_id, b"HELLO_ACK", peer_nonce);
+        let hmac_tag = compute_punch_hmac(hmac_key, device_id, b"HELLO_ACK", peer_nonce)
+            .unwrap_or_default();
         msg.extend_from_slice(&hmac_tag);
         msg
     }
@@ -363,7 +365,8 @@ pub fn build_hello_packet_with_hmac(
 ) -> Vec<u8> {
     let mut msg = b"HELLO".to_vec();
     msg.extend_from_slice(&hex_encode(nonce));
-    let hmac_tag = compute_punch_hmac(hmac_key, device_id, b"HELLO", nonce);
+    let hmac_tag = compute_punch_hmac(hmac_key, device_id, b"HELLO", nonce)
+        .unwrap_or_default();
     msg.extend_from_slice(&hmac_tag);
     msg
 }
@@ -377,7 +380,8 @@ pub fn build_hello_ack_packet_with_hmac(
 ) -> Vec<u8> {
     let mut msg = b"HELLO_ACK".to_vec();
     msg.extend_from_slice(&hex_encode(nonce));
-    let hmac_tag = compute_punch_hmac(hmac_key, device_id, b"HELLO_ACK", nonce);
+    let hmac_tag = compute_punch_hmac(hmac_key, device_id, b"HELLO_ACK", nonce)
+        .unwrap_or_default();
     msg.extend_from_slice(&hmac_tag);
     msg
 }
@@ -441,13 +445,16 @@ fn compute_punch_hmac(
     device_id: &[u8; 16],
     message_type: &[u8],
     nonce: &[u8; 10],
-) -> [u8; 32] {
+) -> Result<[u8; 32], String> {
+    if hmac_key.is_empty() {
+        return Err("Punch HMAC key not configured".into());
+    }
     let mut mac = HmacSha256::new_from_slice(hmac_key)
-        .expect("HMAC key should be valid");
+        .map_err(|_| "Invalid punch HMAC key".to_string())?;
     mac.update(device_id);
     mac.update(message_type);
     mac.update(nonce);
-    mac.finalize().into_bytes().into()
+    Ok(mac.finalize().into_bytes().into())
 }
 
 /// Verify an HMAC tag on a received punch packet.

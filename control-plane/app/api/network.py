@@ -69,6 +69,7 @@ async def find_path(
 async def check_nat_compatibility(
     nat_a: str = Query(..., description="NAT type of device A"),
     nat_b: str = Query(..., description="NAT type of device B"),
+    user=Depends(get_current_user),
 ):
     """Check if two NAT types are compatible for direct P2P."""
     return {

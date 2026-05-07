@@ -358,7 +358,7 @@ services:
   # Loki — Log aggregation
   # ============================================================
   loki:
-    image: grafana/loki:latest
+    image: grafana/loki:3.0.0
     user: "10001"
     ports:
       - "127.0.0.1:3100:3100"
@@ -374,7 +374,7 @@ services:
   # Promtail — Log collector (ships container logs to Loki)
   # ============================================================
   promtail:
-    image: grafana/promtail:latest
+    image: grafana/promtail:3.0.0
     volumes:
       - ../monitoring/promtail-config.yaml:/etc/promtail/config.yml:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
@@ -388,7 +388,7 @@ services:
   # Jaeger — Distributed tracing (OTLP collector + UI)
   # ============================================================
   jaeger:
-    image: jaegertracing/all-in-one:latest
+    image: jaegertracing/all-in-one:1.60
     ports:
       - "127.0.0.1:16686:16686"   # UI
       - "127.0.0.1:4317:4317"     # OTLP gRPC

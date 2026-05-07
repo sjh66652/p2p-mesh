@@ -8,12 +8,14 @@
 services:
   # ---- PostgreSQL HA with Patroni ----
   etcd:
-    image: bitnami/etcd:3.5
+    image: bitnami/etcd:3.5.15
     environment:
       - ALLOW_NONE_AUTHENTICATION=no
-      - ETCD_ROOT_PASSWORD=${ETCD_ROOT_PASSWORD:-CHANGE_ME_ETCD_PASSWORD}
-      - ETCD_ADVERTISE_CLIENT_URLS=http://etcd:2379
-      - ETCD_LISTEN_CLIENT_URLS=http://etcd:2379
+      - ETCD_ROOT_PASSWORD=${ETCD_ROOT_PASSWORD:?ETCD_ROOT_PASSWORD is required}
+      - ETCD_ADVERTISE_CLIENT_URLS=https://etcd:2379
+      - ETCD_LISTEN_CLIENT_URLS=https://etcd:2379
+      - ETCD_CLIENT_TLS=true
+      - ETCD_PEER_TLS=true
     networks:
       - mesh-internal
     restart: unless-stopped
@@ -65,9 +67,9 @@ services:
 
   # ---- Redis Cluster (3-node) ----
   redis-node-0:
-    image: redis:7-alpine
-    # SECURITY: --requirepass is visible in /proc. For production, use TLS client certs (Redis 6.2+)
-    command: redis-server --port 6379 --cluster-enabled yes --cluster-config-file nodes.conf --cluster-node-timeout 5000 --appendonly yes --requirepass ${REDIS_PASSWORD}
+    image: redis:7.4-alpine
+    command: >
+      sh -c 'echo "requirepass ${REDIS_PASSWORD}" > /etc/redis/extra.conf && echo "cluster-enabled yes" >> /etc/redis/extra.conf && echo "cluster-config-file nodes.conf" >> /etc/redis/extra.conf && echo "cluster-node-timeout 5000" >> /etc/redis/extra.conf && echo "appendonly yes" >> /etc/redis/extra.conf && exec redis-server /etc/redis/extra.conf'
     volumes:
       - redis_node0_data:/data
     networks:
@@ -75,9 +77,9 @@ services:
     restart: unless-stopped
 
   redis-node-1:
-    image: redis:7-alpine
-    # SECURITY: --requirepass is visible in /proc. For production, use TLS client certs (Redis 6.2+)
-    command: redis-server --port 6379 --cluster-enabled yes --cluster-config-file nodes.conf --cluster-node-timeout 5000 --appendonly yes --requirepass ${REDIS_PASSWORD}
+    image: redis:7.4-alpine
+    command: >
+      sh -c 'echo "requirepass ${REDIS_PASSWORD}" > /etc/redis/extra.conf && echo "cluster-enabled yes" >> /etc/redis/extra.conf && echo "cluster-config-file nodes.conf" >> /etc/redis/extra.conf && echo "cluster-node-timeout 5000" >> /etc/redis/extra.conf && echo "appendonly yes" >> /etc/redis/extra.conf && exec redis-server /etc/redis/extra.conf'
     volumes:
       - redis_node1_data:/data
     networks:
@@ -85,9 +87,9 @@ services:
     restart: unless-stopped
 
   redis-node-2:
-    image: redis:7-alpine
-    # SECURITY: --requirepass is visible in /proc. For production, use TLS client certs (Redis 6.2+)
-    command: redis-server --port 6379 --cluster-enabled yes --cluster-config-file nodes.conf --cluster-node-timeout 5000 --appendonly yes --requirepass ${REDIS_PASSWORD}
+    image: redis:7.4-alpine
+    command: >
+      sh -c 'echo "requirepass ${REDIS_PASSWORD}" > /etc/redis/extra.conf && echo "cluster-enabled yes" >> /etc/redis/extra.conf && echo "cluster-config-file nodes.conf" >> /etc/redis/extra.conf && echo "cluster-node-timeout 5000" >> /etc/redis/extra.conf && echo "appendonly yes" >> /etc/redis/extra.conf && exec redis-server /etc/redis/extra.conf'
     volumes:
       - redis_node2_data:/data
     networks:

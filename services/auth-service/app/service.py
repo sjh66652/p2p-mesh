@@ -13,10 +13,13 @@ Preserves ALL security from the original monolith:
 ADDED: plan field to JWT token creation.
 """
 
+import logging
 import uuid
 from datetime import datetime, timedelta, timezone
 
 import bcrypt
+
+logger = logging.getLogger(__name__)
 from jose import jwt, JWTError
 import secrets
 from sqlalchemy.ext.asyncio import AsyncSession

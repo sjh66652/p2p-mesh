@@ -201,10 +201,11 @@ async def get_best_relay(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="No suitable relay available",
         )
+    is_admin = user.get("role", "") == "admin"
     return BestRelayResponse(
         id=relay.id,
         name=relay.name,
-        ip=relay.ip,
+        ip=relay.ip if is_admin else "***",
         port=relay.port,
         region=relay.region,
         load=relay.load,

@@ -12,12 +12,15 @@ Endpoints:
 """
 
 import ipaddress
+import uuid as _uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel, Field
+
+from app.models.device import Device
 
 from app.database import get_db
 from app.dependencies import get_current_user
@@ -165,6 +168,17 @@ async def allocate_ip(
     """
     device_id = request.device_id
 
+    # Verify device belongs to authenticated user
+    try:
+        dev_uuid = _uuid.UUID(device_id)
+    except (ValueError, AttributeError):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid device ID")
+    result = await db.execute(
+        select(Device).where(Device.id == dev_uuid, Device.user_id == user.id)
+    )
+    if not result.scalar_one_or_none():
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Device not found or not authorized")
+
     # Ensure in-memory state is loaded from DB
     await _load_from_db(db)
 
@@ -231,6 +245,17 @@ async def release_ip(
     """
     device_id = request.device_id
 
+    # Verify device belongs to authenticated user
+    try:
+        dev_uuid = _uuid.UUID(device_id)
+    except (ValueError, AttributeError):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid device ID")
+    result = await db.execute(
+        select(Device).where(Device.id == dev_uuid, Device.user_id == user.id)
+    )
+    if not result.scalar_one_or_none():
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Device not found or not authorized")
+
     # Ensure in-memory state is loaded from DB
     await _load_from_db(db)
 
@@ -265,6 +290,17 @@ async def get_device_ip(
     db: AsyncSession = Depends(get_db),
 ):
     """Look up a device's assigned virtual IP address."""
+    # Verify device belongs to authenticated user
+    try:
+        dev_uuid = _uuid.UUID(device_id)
+    except (ValueError, AttributeError):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid device ID")
+    result = await db.execute(
+        select(Device).where(Device.id == dev_uuid, Device.user_id == user.id)
+    )
+    if not result.scalar_one_or_none():
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Device not found or not authorized")
+
     # Ensure in-memory state is loaded from DB
     await _load_from_db(db)
 
@@ -291,9 +327,16 @@ async def list_peers(
     user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Get the full mapping of device_id -> virtual_ip for all peers."""
+    """Get the mapping of device_id -> virtual_ip for the authenticated user's devices only."""
     # Ensure in-memory state is loaded from DB
     await _load_from_db(db)
+
+    # Only return devices belonging to the authenticated user
+    user_devices = await db.execute(
+        select(Device.id).where(Device.user_id == user.id)
+    )
+    user_device_ids = {str(row[0]) for row in user_devices.all()}
+
     peers = [
         PeerInfo(
             device_id=dev_id,
@@ -301,6 +344,7 @@ async def list_peers(
             assigned_at=assigned,
         )
         for dev_id, (ip, assigned) in _assigned_ips.items()
+        if dev_id in user_device_ids
     ]
 
     return PeersResponse(

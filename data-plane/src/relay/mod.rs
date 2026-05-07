@@ -90,15 +90,18 @@ impl ForwardingTable {
     }
 
     /// Compute an HMAC tag for a given src+dst pair (used by clients).
-    pub fn compute_hmac(&self, src_id: &str, dst_id: &str) -> Vec<u8> {
+    pub fn compute_hmac(&self, src_id: &str, dst_id: &str) -> Result<Vec<u8>, String> {
         use hmac::{Hmac, Mac};
         type HmacSha256 = Hmac<Sha256>;
 
+        if self.hmac_key.is_empty() {
+            return Err("HMAC key not configured".into());
+        }
         let mut mac = HmacSha256::new_from_slice(&self.hmac_key)
-            .expect("HMAC key should be valid");
+            .map_err(|_| "Invalid HMAC key".to_string())?;
         mac.update(src_id.as_bytes());
         mac.update(dst_id.as_bytes());
-        mac.finalize().into_bytes().to_vec()
+        Ok(mac.finalize().into_bytes().to_vec())
     }
 
     /// Register a device's current address (only after HMAC verification).

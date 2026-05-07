@@ -26,7 +26,7 @@ use chacha20poly1305::{
 };
 use rand::RngCore;
 use sha2::{Digest, Sha256};
-use x25519_dalek::{EphemeralSecret, PublicKey, ReusableSecret};
+use x25519_dalek::{PublicKey, ReusableSecret};
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 /// Noise handshake state.
@@ -53,7 +53,9 @@ pub struct NoiseIKHandshake {
     /// Our ephemeral keypair (generated per-handshake, zeroed on drop).
     /// On initiator side: stores the initiator's ephemeral secret for ee/se DH.
     /// On responder side: stores the responder's ephemeral secret after generation.
-    ephemeral_secret: Option<EphemeralSecret>,
+    /// Uses ReusableSecret (not EphemeralSecret) because the same secret must
+    /// be used for multiple diffie_hellman calls (es then later ee/se).
+    ephemeral_secret: Option<ReusableSecret>,
     /// Peer's ephemeral public key (set during handshake processing).
     /// Used for DH operations against the remote party's ephemeral key.
     peer_ephemeral_public: [u8; 32],
@@ -141,10 +143,14 @@ impl NoiseIKHandshake {
             return Err(NoiseError::InvalidState);
         }
 
-        // Generate ephemeral keypair
-        let ephemeral_secret = EphemeralSecret::random_from_rng(rand::thread_rng());
+        // Generate ephemeral keypair using ReusableSecret so the same secret
+        // can be used for es DH now and ee/se DH later in process_responder_message.
+        let ephemeral_secret = ReusableSecret::random_from_rng(rand::thread_rng());
         let ephemeral_public = PublicKey::from(&ephemeral_secret);
         let ephemeral_public_bytes = *ephemeral_public.as_bytes();
+
+        // Save before using: ephem must live for ee/se in process_responder_message
+        self.ephemeral_secret = Some(ephemeral_secret);
 
         // Update handshake hash: h = SHA-256(h || e.public)
         let mut hasher = Sha256::new();
@@ -154,7 +160,7 @@ impl NoiseIKHandshake {
 
         // es: DH(our_ephemeral, peer_static)
         let peer_static = PublicKey::from(self.peer_static_public);
-        let es_shared = ephemeral_secret.diffie_hellman(&peer_static);
+        let es_shared = self.ephemeral_secret.as_ref().unwrap().diffie_hellman(&peer_static);
         mix_key(&mut self.chaining_key, es_shared.as_bytes());
 
         // s: encrypt our static public key
@@ -179,7 +185,6 @@ impl NoiseIKHandshake {
         message.extend_from_slice(&ephemeral_public_bytes);
         message.extend_from_slice(&encrypted_s);
 
-        self.ephemeral_secret = Some(ephemeral_secret);
         self.state = HandshakeState::InitiatorSent;
 
         log::info!("Noise IK: Initiator message built ({} bytes)", message.len());
@@ -339,8 +344,9 @@ impl NoiseIKHandshake {
         // Reconstruct initiator's ephemeral public key
         let init_ephemeral = PublicKey::from(self.peer_ephemeral_public);
 
-        // Generate responder's ephemeral keypair
-        let resp_ephemeral_secret = EphemeralSecret::new(rand::thread_rng());
+        // Generate responder's ephemeral keypair using ReusableSecret so
+        // the same secret can be used in multiple diffie_hellman calls if needed.
+        let resp_ephemeral_secret = ReusableSecret::random_from_rng(rand::thread_rng());
         let resp_ephemeral_public = PublicKey::from(&resp_ephemeral_secret);
         let resp_ephemeral_bytes = *resp_ephemeral_public.as_bytes();
 
@@ -371,11 +377,10 @@ impl NoiseIKHandshake {
     }
 
     /// Get the transport keys after handshake completion.
+    /// Only returns keys when the handshake is fully established,
+    /// ensuring forward secrecy from both `ee` and `se` exchanges.
     pub fn transport_keys(&self) -> Option<(NoiseTransportKey, NoiseTransportKey)> {
-        if self.state == HandshakeState::InitiatorSent
-            || self.state == HandshakeState::ResponderSent
-            || self.state == HandshakeState::Established
-        {
+        if self.state == HandshakeState::Established {
             let (send_key, recv_key) = split(&self.chaining_key);
             Some((
                 NoiseTransportKey::new(send_key),
@@ -403,7 +408,7 @@ impl NoiseTransportKey {
     ///
     /// Returns the encrypted payload with nonce prepended.
     /// Format: [nonce (12B)][ciphertext + tag]
-    pub fn encrypt(&mut self, plaintext: &[u8]) -> Vec<u8> {
+    pub fn encrypt(&mut self, plaintext: &[u8]) -> Result<Vec<u8>, NoiseError> {
         let cipher = ChaCha20Poly1305::new(Key::from_slice(&self.key));
 
         let mut nonce_bytes = [0u8; 12];
@@ -413,12 +418,12 @@ impl NoiseTransportKey {
         self.nonce += 1;
 
         let ciphertext = cipher.encrypt(nonce, plaintext)
-            .expect("Noise encrypt should not fail");
+            .map_err(|_| NoiseError::EncryptionFailed)?;
 
         let mut result = Vec::with_capacity(12 + ciphertext.len());
         result.extend_from_slice(&nonce_bytes);
         result.extend_from_slice(&ciphertext);
-        result
+        Ok(result)
     }
 
     /// Decrypt a ciphertext payload.
@@ -445,6 +450,9 @@ pub enum NoiseError {
 
     #[error("Decryption failed")]
     DecryptionFailed,
+
+    #[error("Encryption failed")]
+    EncryptionFailed,
 }
 
 // ---- Noise Cryptographic Primitives ----
@@ -454,10 +462,18 @@ fn mix_key(ck: &mut [u8; 32], input: &[u8]) {
     use hmac::{Hmac, Mac};
     type HmacSha256 = Hmac<Sha256>;
 
-    let mut mac = <HmacSha256 as hmac::Mac>::new_from_slice(ck)
-        .expect("HMAC key should be valid");
-    mac.update(input);
-    ck.copy_from_slice(&mac.finalize().into_bytes());
+    // HMAC-SHA256 accepts any key length, so new_from_slice on a [u8; 32]
+    // is guaranteed to succeed. The fallback here is a defensive measure only.
+    match <HmacSha256 as hmac::Mac>::new_from_slice(ck) {
+        Ok(mut mac) => {
+            mac.update(input);
+            ck.copy_from_slice(&mac.finalize().into_bytes());
+        }
+        Err(e) => {
+            // This should never happen — HMAC-SHA256 accepts any key length.
+            log::error!("mix_key: HMAC initialization failed (impossible): {}", e);
+        }
+    }
 }
 
 /// Split a chaining key into two 32-byte keys.
@@ -468,23 +484,38 @@ fn split(ck: &[u8; 32]) -> ([u8; 32], [u8; 32]) {
     let mut k1 = [0u8; 32];
     let mut k2 = [0u8; 32];
 
-    // temp = HMAC-SHA256(ck, 0x01)
-    let mut mac = <HmacSha256 as hmac::Mac>::new_from_slice(ck)
-        .expect("HMAC key should be valid");
-    mac.update(&[0x01]);
-    k1.copy_from_slice(&mac.finalize().into_bytes());
+    // HMAC-SHA256 accepts any key length, so new_from_slice on a [u8; 32]
+    // is guaranteed to succeed. Log and return zero keys as safety net.
+    match <HmacSha256 as hmac::Mac>::new_from_slice(ck) {
+        Ok(mut mac) => {
+            // temp = HMAC-SHA256(ck, 0x01)
+            mac.update(&[0x01]);
+            k1.copy_from_slice(&mac.finalize().into_bytes());
+        }
+        Err(e) => {
+            log::error!("split(k1): HMAC initialization failed (impossible): {}", e);
+        }
+    }
 
-    // out2 = HMAC-SHA256(ck, temp || 0x02)
-    let mut mac = <HmacSha256 as hmac::Mac>::new_from_slice(ck)
-        .expect("HMAC key should be valid");
-    mac.update(&k1);
-    mac.update(&[0x02]);
-    k2.copy_from_slice(&mac.finalize().into_bytes());
+    match <HmacSha256 as hmac::Mac>::new_from_slice(ck) {
+        Ok(mut mac) => {
+            // out2 = HMAC-SHA256(ck, temp || 0x02)
+            mac.update(&k1);
+            mac.update(&[0x02]);
+            k2.copy_from_slice(&mac.finalize().into_bytes());
+        }
+        Err(e) => {
+            log::error!("split(k2): HMAC initialization failed (impossible): {}", e);
+        }
+    }
 
     (k1, k2)
 }
 
 /// Encrypt data with a symmetric key (AEAD).
+/// Panics: ChaCha20-Poly1305 encryption only fails on incorrect nonce length,
+/// which is always 12 bytes here. This is an internal helper used during
+/// handshake only — panic is acceptable as it indicates a programming error.
 fn encrypt_with_key(key: &[u8; 32], plaintext: &[u8], rng: &mut impl RngCore) -> Vec<u8> {
     let cipher = ChaCha20Poly1305::new(Key::from_slice(key));
 
@@ -492,7 +523,8 @@ fn encrypt_with_key(key: &[u8; 32], plaintext: &[u8], rng: &mut impl RngCore) ->
     rng.fill_bytes(&mut nonce_bytes);
     let nonce = Nonce::from_slice(&nonce_bytes);
 
-    let ciphertext = cipher.encrypt(nonce, plaintext).expect("Encrypt should not fail");
+    let ciphertext = cipher.encrypt(nonce, plaintext)
+        .expect("encrypt_with_key: ChaCha20-Poly1305 encrypt must not fail with valid 12-byte nonce");
 
     let mut result = Vec::with_capacity(12 + ciphertext.len());
     result.extend_from_slice(&nonce_bytes);
@@ -556,7 +588,7 @@ mod tests {
         let mut recv_key = NoiseTransportKey::new(key);
 
         let plaintext = b"Hello, Noise Protocol!";
-        let encrypted = send_key.encrypt(plaintext);
+        let encrypted = send_key.encrypt(plaintext).unwrap();
         let decrypted = recv_key.decrypt(&encrypted);
 
         assert_eq!(decrypted, Some(plaintext.to_vec()));
@@ -568,8 +600,8 @@ mod tests {
         let mut key1 = NoiseTransportKey::new(key);
         let mut key2 = NoiseTransportKey::new(key);
 
-        let p1 = key1.encrypt(b"message1");
-        let p2 = key1.encrypt(b"message2");
+        let p1 = key1.encrypt(b"message1").unwrap();
+        let p2 = key1.encrypt(b"message2").unwrap();
 
         // Different nonces should produce different ciphertexts
         assert_ne!(p1, p2);
@@ -626,12 +658,12 @@ mod tests {
 
         // Verify bidirectional encryption works
         let plaintext = b"Hello, Noise IK!";
-        let encrypted_a = init_send.encrypt(plaintext);
+        let encrypted_a = init_send.encrypt(plaintext).unwrap();
         let decrypted_b = resp_recv.decrypt(&encrypted_a);
         assert_eq!(decrypted_b, Some(plaintext.to_vec()));
 
         let reply = b"Hello back!";
-        let encrypted_b = resp_send.encrypt(reply);
+        let encrypted_b = resp_send.encrypt(reply).unwrap();
         let decrypted_a = init_recv.decrypt(&encrypted_b);
         assert_eq!(decrypted_a, Some(reply.to_vec()));
     }

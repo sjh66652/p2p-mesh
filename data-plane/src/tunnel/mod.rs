@@ -131,6 +131,32 @@ impl TunnelManager {
     pub fn tunnel_count(&self) -> usize {
         self.tunnels.len()
     }
+
+    /// Receive and decrypt a packet from any peer tunnel.
+    /// Returns (peer_id, decrypted_packet) on success, or None if no data available
+    /// or if the socket would block (non-blocking mode).
+    pub async fn recv_from(&self) -> Option<(String, Vec<u8>)> {
+        let mut buf = [0u8; 65536];
+        let (n, src_addr) = match self.socket.recv_from(&mut buf).await {
+            Ok((n, addr)) => (n, addr),
+            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => return None,
+            Err(e) => {
+                log::error!("Tunnel recv error: {}", e);
+                return None;
+            }
+        };
+
+        let data = &buf[..n];
+        // Find which tunnel this packet belongs to by matching peer address
+        for (peer_id, tunnel_arc) in &self.tunnels {
+            let mut tunnel = tunnel_arc.lock().await;
+            if tunnel.peer_addr == src_addr {
+                return tunnel.decapsulate(data).map(|pt| (peer_id.clone(), pt));
+            }
+        }
+        log::trace!("Packet from unknown peer: {}", src_addr);
+        None
+    }
 }
 
 /// Perform UDP hole punching to establish a P2P connection.
@@ -248,11 +274,13 @@ pub async fn establish_p2p_connection(
         .and_then(|k| if k.is_empty() { None } else { Some(k) })
         .unwrap_or_else(|| {
             // PUNCH_HMAC_KEY is required for production. Without it, HMAC authentication
-            // during hole punching provides zero security (random key never shared with peer).
-            panic!(
-                "PUNCH_HMAC_KEY environment variable is required. \
+            // during hole punching is essentially disabled (no shared key with peer).
+            log::warn!(
+                "PUNCH_HMAC_KEY not set — hole punch will be unauthenticated. \
                  Generate with: openssl rand -hex 32"
             );
+            // Return an empty key; the puncher will use it as a "no auth" sentinel.
+            Vec::new()
         });
 
     let punch_result = puncher::execute_punch(

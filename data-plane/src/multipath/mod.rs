@@ -162,6 +162,11 @@ impl MultiPathManager {
                 log::warn!("Path {} {:?} marked inactive", peer_id, path_type);
             }
         }
+        // Clean up the active_path map so get_active_addr returns None for this path
+        let mut active = self.active_path.write().await;
+        if active.get(peer_id) == Some(path_type) {
+            active.remove(peer_id);
+        }
     }
 
     pub async fn mark_active(&self, peer_id: &str, path_type: &PathType) {

@@ -56,15 +56,14 @@ spec:
               drop: ["ALL"]
             readOnlyRootFilesystem: false
           command:
-            - redis-server
-            - --appendonly
-            - "yes"
-            - --maxmemory
-            - "256mb"
-            - --maxmemory-policy
-            - allkeys-lru
-            - --requirepass
-            - "$(REDIS_PASSWORD)"
+            - sh
+            - -c
+            - |
+              echo "requirepass ${REDIS_PASSWORD}" > /etc/redis/extra.conf
+              echo "appendonly yes" >> /etc/redis/extra.conf
+              echo "maxmemory 256mb" >> /etc/redis/extra.conf
+              echo "maxmemory-policy allkeys-lru" >> /etc/redis/extra.conf
+              exec redis-server /etc/redis/extra.conf
           env:
             - name: REDIS_PASSWORD
               valueFrom:

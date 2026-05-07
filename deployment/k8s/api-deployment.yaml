@@ -77,7 +77,7 @@ spec:
                 topologyKey: kubernetes.io/hostname
       containers:
         - name: api
-          image: p2p-mesh-api:latest
+          image: ${DOCKER_REGISTRY:-yourorg}/p2p-mesh-api:${IMAGE_TAG:-latest}
           imagePullPolicy: Always
           ports:
             - containerPort: 8000

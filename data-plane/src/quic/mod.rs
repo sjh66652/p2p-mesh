@@ -10,7 +10,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use quinn::{Connection, Endpoint, RecvStream, ServerConfig, TransportConfig};
+use quinn::{Connection, Endpoint, RecvStream, ServerConfig, TransportConfig, VarInt};
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
 use sha2::{Digest, Sha256};
 
@@ -33,8 +33,7 @@ impl QuicTransport {
         server_name: &str,
         peer_fingerprint: Option<&str>,
     ) -> Result<Connection, Box<dyn std::error::Error>> {
-        // Require certificate fingerprint pinning for all connections.
-        // SkipServerVerification is never used in production — MITM protection is mandatory.
+        // Require certificate fingerprint pinning for all connections — MITM protection is mandatory.
         let fp = peer_fingerprint.ok_or_else(|| {
             format!(
                 "Certificate fingerprint required for peer {} — refusing to connect without identity verification. \
@@ -51,7 +50,7 @@ impl QuicTransport {
         )?;
         let mut client_config = quinn::ClientConfig::new(Arc::new(quic_client_config));
         let mut transport = TransportConfig::default();
-        transport.max_idle_timeout(Some(Duration::from_secs(30).try_into().unwrap()));
+        transport.max_idle_timeout(Some(Duration::from_secs(30).try_into().unwrap_or(VarInt::MAX)));
         transport.keep_alive_interval(Some(Duration::from_secs(10)));
         transport.max_concurrent_bidi_streams(100u32.into());
         transport.send_window(8 * 1024 * 1024);
@@ -130,7 +129,7 @@ fn configure_server(
     let quic_config = quinn::crypto::rustls::QuicServerConfig::try_from(Arc::new(server_crypto))?;
     let mut server_config = quinn::ServerConfig::with_crypto(Arc::new(quic_config));
     let mut transport = TransportConfig::default();
-    transport.max_idle_timeout(Some(Duration::from_secs(30).try_into().unwrap()));
+    transport.max_idle_timeout(Some(Duration::from_secs(30).try_into().unwrap_or(VarInt::MAX)));
     transport.keep_alive_interval(Some(Duration::from_secs(10)));
     transport.max_concurrent_bidi_streams(100u32.into());
     transport.send_window(8 * 1024 * 1024);
@@ -180,55 +179,6 @@ impl rustls::client::danger::ServerCertVerifier for CertificatePinner {
                 self.expected_fingerprint, hash
             )))
         }
-    }
-
-    fn verify_tls12_signature(
-        &self,
-        _message: &[u8],
-        _cert: &CertificateDer<'_>,
-        _dss: &rustls::DigitallySignedStruct,
-    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
-        Ok(rustls::client::danger::HandshakeSignatureValid::assertion())
-    }
-
-    fn verify_tls13_signature(
-        &self,
-        _message: &[u8],
-        _cert: &CertificateDer<'_>,
-        _dss: &rustls::DigitallySignedStruct,
-    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
-        Ok(rustls::client::danger::HandshakeSignatureValid::assertion())
-    }
-
-    fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
-        vec![
-            rustls::SignatureScheme::RSA_PKCS1_SHA256,
-            rustls::SignatureScheme::ECDSA_NISTP256_SHA256,
-            rustls::SignatureScheme::ECDSA_NISTP384_SHA384,
-            rustls::SignatureScheme::ED25519,
-        ]
-    }
-}
-
-#[derive(Debug)]
-struct SkipServerVerification;
-
-impl SkipServerVerification {
-    fn new() -> Arc<Self> {
-        Arc::new(Self)
-    }
-}
-
-impl rustls::client::danger::ServerCertVerifier for SkipServerVerification {
-    fn verify_server_cert(
-        &self,
-        _end_entity: &CertificateDer<'_>,
-        _intermediates: &[CertificateDer<'_>],
-        _server_name: &rustls::pki_types::ServerName<'_>,
-        _ocsp_response: &[u8],
-        _now: rustls::pki_types::UnixTime,
-    ) -> Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
-        Ok(rustls::client::danger::ServerCertVerified::assertion())
     }
 
     fn verify_tls12_signature(

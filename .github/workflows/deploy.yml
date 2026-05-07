@@ -73,7 +73,7 @@ jobs:
         run: |
           cd data-plane
           cargo install cargo-audit
-          cargo audit
+          cargo audit --deny warnings
 
   # ---- 构建并推送镜像（矩阵策略：6 个微服务） ----
   build-and-push:
@@ -128,6 +128,22 @@ jobs:
             ${{ env.DOCKER_REGISTRY }}/p2p-mesh-${{ matrix.service.service-name }}:${{ steps.version.outputs.VERSION }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Scan container images with Trivy
+        uses: aquasecurity/trivy-action@0.29.0
+        with:
+          image-ref: '${{ env.DOCKER_REGISTRY }}/p2p-mesh-${{ matrix.service.service-name }}:latest'
+          format: 'sarif'
+          output: 'trivy-results-${{ matrix.service.service-name }}.sarif'
+          severity: 'HIGH,CRITICAL'
+          exit-code: '1'
+
+      - name: Upload Trivy results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: 'trivy-results-${{ matrix.service.service-name }}.sarif'
+          category: 'trivy-${{ matrix.service.service-name }}'
+        if: always()
 
       # TODO: Enable Trivy vulnerability scanning before production
       # Uncomment the step below to scan container images for known CVEs.

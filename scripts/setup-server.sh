@@ -34,6 +34,8 @@ ufw allow 22/tcp     # SSH
 ufw allow 80/tcp     # HTTP
 ufw allow 443/tcp    # HTTPS
 ufw allow 51821/udp  # Relay
+ufw allow 3478/udp   # STUN
+ufw deny out to any port 25 # Block SMTP outbound (spam prevention)
 ufw --force enable
 
 # 6. 生成 DH 参数（用于 SSL）

@@ -202,7 +202,7 @@ impl AclEngine {
         rules.sort_by_key(|r| std::cmp::Reverse(r.priority));
 
         for rule in &rules {
-            if self.rule_matches(rule, src_device, dst_device, protocol, dst_port) {
+            if self.rule_matches(rule, src_device, dst_device, protocol, dst_port, &policy.groups) {
                 return rule.action == AclAction::Allow;
             }
         }
@@ -222,14 +222,15 @@ impl AclEngine {
         dst_device: &str,
         protocol: &str,
         dst_port: u16,
+        groups: &HashMap<String, Vec<String>>,
     ) -> bool {
         // Check source matches
         let src_matches = src_device == rule.src
-            || self.device_in_group_static(src_device, &rule.src);
+            || device_in_group(src_device, &rule.src, groups);
 
         // Check destination matches
         let dst_matches = dst_device == rule.dst
-            || self.device_in_group_static(dst_device, &rule.dst);
+            || device_in_group(dst_device, &rule.dst, groups);
 
         if !src_matches || !dst_matches {
             return false;
@@ -248,12 +249,23 @@ impl AclEngine {
         true
     }
 
-    /// Static group check (doesn't require async).
-    fn device_in_group_static(&self, device_id: &str, group_name: &str) -> bool {
-        // We can't call async here, but the policy is read-locked by the caller
-        // In production, cache group membership lookup
-        device_id == group_name || group_name == "any" || group_name == "*"
+/// Check if a device belongs to a named group.
+///
+/// Handles special group names "any" and "*" as wildcards.
+/// Consults the groups map for actual group membership.
+fn device_in_group(device_id: &str, group_name: &str, groups: &HashMap<String, Vec<String>>) -> bool {
+    if group_name == "any" || group_name == "*" {
+        return true;
     }
+    if device_id == group_name {
+        return true;
+    }
+    // Check actual group membership
+    if let Some(members) = groups.get(group_name) {
+        return members.iter().any(|m| m == device_id);
+    }
+    false
+}
 
     /// Get the current policy for inspection.
     pub async fn get_policy(&self) -> AclPolicy {

@@ -1,3 +1,5 @@
+# SECURITY: Authentication is intentionally disabled for development.
+# In production, set to true and configure an authenticating reverse proxy.
 auth_enabled: false
 
 # SECURITY: Authentication is currently disabled (auth_enabled: false).

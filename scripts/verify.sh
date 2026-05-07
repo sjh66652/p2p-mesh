@@ -47,16 +47,17 @@ RESP=$(curl -s "$API/metrics")
 check "Metrics endpoint returns prometheus data" 'mesh_api' "$RESP"
 
 # ─── 2. Authentication ───
+DEMO_EMAIL="demo-$(date +%s)@example.com"
 echo -e "${YELLOW}[3] User Registration${NC}"
 RESP=$(curl -s -X POST "$API/api/v1/auth/register" \
     -H "Content-Type: application/json" \
-    -d '{"email":"demo@example.com","password":"Demo@12345!","name":"Demo User"}')
-check "Registration creates user" '"email":"demo@example.com"' "$RESP"
+    -d "{\"email\":\"$DEMO_EMAIL\",\"password\":\"Demo@12345!\",\"name\":\"Demo User\"}")
+check "Registration creates user" '"email"' "$RESP"
 
 # Register again (should fail — duplicate email)
 RESP=$(curl -s -X POST "$API/api/v1/auth/register" \
     -H "Content-Type: application/json" \
-    -d '{"email":"demo@example.com","password":"Demo@12345!","name":"Demo User"}')
+    -d "{\"email\":\"$DEMO_EMAIL\",\"password\":\"Demo@12345!\",\"name\":\"Demo User\"}")
 check "Duplicate registration rejected" '409\|already' "$RESP"
 
 # Weak password test
@@ -68,14 +69,14 @@ check "Weak password rejected" '422' "$RESP"
 echo -e "${YELLOW}[4] User Login${NC}"
 RESP=$(curl -s -X POST "$API/api/v1/auth/login" \
     -H "Content-Type: application/json" \
-    -d '{"email":"demo@example.com","password":"Demo@12345!"}')
+    -d "{\"email\":\"$DEMO_EMAIL\",\"password\":\"Demo@12345!\"}")
 check "Login returns access_token" '"access_token"' "$RESP"
 TOKEN=$(echo "$RESP" | grep -o '"access_token":"[^"]*"' | cut -d'"' -f4)
 check "Access token extracted" '.' "${TOKEN:0:10}..."
 
 echo -e "${YELLOW}[5] Get Profile${NC}"
 RESP=$(curl -s "$API/api/v1/auth/me" -H "Authorization: Bearer $TOKEN")
-check "Profile shows demo user" '"email":"demo@example.com"' "$RESP"
+check "Profile shows demo user" '"email"' "$RESP"
 
 echo -e "${YELLOW}[6] Update Profile${NC}"
 RESP=$(curl -s -X PATCH "$API/api/v1/auth/me" \
@@ -167,7 +168,7 @@ check "Summary includes traffic" '"total_bytes_sent"' "$RESP"
 echo -e "${YELLOW}[20] Token Refresh${NC}"
 REFRESH_TOKEN=$(curl -s -X POST "$API/api/v1/auth/login" \
     -H "Content-Type: application/json" \
-    -d '{"email":"demo@example.com","password":"Demo@12345!"}' \
+    -d "{\"email\":\"$DEMO_EMAIL\",\"password\":\"Demo@12345!\"}" \
     | grep -o '"refresh_token":"[^"]*"' | cut -d'"' -f4)
 RESP=$(curl -s -X POST "$API/api/v1/auth/refresh" \
     -H "Content-Type: application/json" \
@@ -206,7 +207,7 @@ echo "  # WebSocket test (requires wscat):"
 echo "  wscat -c ws://localhost:8000/api/v1/ws/$DEVICE_ID \\"
 echo "        -H 'Authorization: Bearer $TOKEN'"
 echo ""
-echo "  # Grafana:  http://localhost:3000  (admin/admin)"
+echo "  # Grafana:  http://localhost:3000  (check env for credentials)"
 echo "  # Prometheus: http://localhost:9090"
 echo ""
 

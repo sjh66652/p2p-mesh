@@ -49,7 +49,7 @@ spec:
                 topologyKey: kubernetes.io/hostname
       containers:
         - name: auth-service
-          image: p2p-mesh-auth:latest
+          image: ${DOCKER_REGISTRY:-yourorg}/p2p-mesh-auth:${IMAGE_TAG:-latest}
           ports:
             - containerPort: 8000
           env:
@@ -196,7 +196,7 @@ spec:
                 topologyKey: kubernetes.io/hostname
       containers:
         - name: user-service
-          image: p2p-mesh-user:latest
+          image: ${DOCKER_REGISTRY:-yourorg}/p2p-mesh-user:${IMAGE_TAG:-latest}
           ports:
             - containerPort: 8000
           env:
@@ -343,7 +343,7 @@ spec:
                 topologyKey: kubernetes.io/hostname
       containers:
         - name: signaling-service
-          image: p2p-mesh-signaling:latest
+          image: ${DOCKER_REGISTRY:-yourorg}/p2p-mesh-signaling:${IMAGE_TAG:-latest}
           ports:
             - containerPort: 8000
           env:
@@ -485,7 +485,7 @@ spec:
                 topologyKey: kubernetes.io/hostname
       containers:
         - name: relay-service
-          image: p2p-mesh-relay:latest
+          image: ${DOCKER_REGISTRY:-yourorg}/p2p-mesh-relay:${IMAGE_TAG:-latest}
           ports:
             - containerPort: 8000
           env:
@@ -632,7 +632,7 @@ spec:
                 topologyKey: kubernetes.io/hostname
       containers:
         - name: usage-service
-          image: p2p-mesh-usage:latest
+          image: ${DOCKER_REGISTRY:-yourorg}/p2p-mesh-usage:${IMAGE_TAG:-latest}
           ports:
             - containerPort: 8000
           env:
@@ -754,7 +754,7 @@ spec:
     spec:
       containers:
         - name: worker
-          image: p2p-mesh-worker:latest
+          image: ${DOCKER_REGISTRY:-yourorg}/p2p-mesh-worker:${IMAGE_TAG:-latest}
           env:
             - name: DATABASE_URL
               value: "postgresql+asyncpg://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@$(POSTGRES_HOST):$(POSTGRES_PORT)/$(POSTGRES_DB)"

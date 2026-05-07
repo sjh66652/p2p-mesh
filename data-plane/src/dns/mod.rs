@@ -210,7 +210,7 @@ impl MeshDns {
             .map_err(|_| format!("DNS send timeout to {}", server))?
             .map_err(|e| format!("DNS send failed: {}", e))?;
 
-        let mut buf = [0u8; 512];
+        let mut buf = [0u8; 4096];
         let (n, _) = tokio::time::timeout(
             self.upstream_timeout,
             socket.recv_from(&mut buf),

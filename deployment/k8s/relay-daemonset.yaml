@@ -35,7 +35,7 @@ spec:
           effect: "NoSchedule"
       containers:
         - name: relay
-          image: p2p-mesh-relay:latest
+          image: ${DOCKER_REGISTRY:-yourorg}/p2p-mesh-relay:${IMAGE_TAG:-latest}
           imagePullPolicy: Always
           ports:
             - containerPort: 51821
