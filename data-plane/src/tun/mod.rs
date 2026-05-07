@@ -13,7 +13,13 @@
 use std::io::{self, Read, Write};
 
 use tokio::io::unix::AsyncFd;
-use tun::Device;
+
+/// Platform-specific TUN device type.
+/// On Linux, this is the posix Device implementation.
+#[cfg(target_os = "linux")]
+use tun::platform::posix::Device as TunDevice;
+#[cfg(not(target_os = "linux"))]
+use tun::platform::Device as TunDevice;
 
 /// Represents a TUN virtual network interface.
 ///
@@ -22,7 +28,7 @@ pub struct TunInterface {
     /// TUN device name (e.g., "mesh0")
     name: String,
     /// Async wrapper for tokio integration
-    async_fd: AsyncFd<dyn tun::Device>,
+    async_fd: AsyncFd<TunDevice>,
 }
 
 impl TunInterface {
@@ -50,7 +56,6 @@ impl TunInterface {
                 let mut config = tun::Configuration::default();
                 config
                     .name(&dev_name)
-                    .packet_info(false)
                     .mtu(mtu as i32)
                     .address(address)
                     .netmask(netmask)
@@ -81,7 +86,8 @@ impl TunInterface {
                 )
             })?;
 
-        let name = device.name().to_string();
+        let name = device.name()
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("failed to get TUN device name: {}", e)))?;
 
         // Set the interface up and assign the address
         #[cfg(target_os = "linux")]

@@ -118,7 +118,7 @@ impl MobileMeshClient {
     }
 
     /// Start the mesh tunnel on mobile.
-    pub async fn start(&self, tun_fd: Option<i32>) -> Result<(), MobileError> {
+    pub async fn start(&self, _tun_fd: Option<i32>) -> Result<(), MobileError> {
         log::info!(
             "Mobile mesh starting on {:?} (MTU={})",
             self.platform, self.config.mobile_mtu

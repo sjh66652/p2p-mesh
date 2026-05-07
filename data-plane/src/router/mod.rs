@@ -35,7 +35,7 @@ pub struct Route {
     /// Whether this route is currently active
     pub active: bool,
     /// When this route was added
-    #[serde(skip)]
+    #[serde(skip, default = "instant_now")]
     pub added_at: Instant,
     /// Last time this route was used
     #[serde(skip)]
@@ -53,6 +53,8 @@ pub enum RouteType {
     /// Default route (0.0.0.0/0)
     Default,
 }
+
+fn instant_now() -> Instant { Instant::now() }
 
 /// ECMP (Equal-Cost Multi-Path) group.
 ///

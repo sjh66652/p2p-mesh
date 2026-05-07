@@ -21,6 +21,8 @@ use tokio::sync::RwLock;
 /// Maximum hop count (infinity = 16, like RIP).
 pub const INFINITY: u32 = 16;
 
+fn instant_now() -> Instant { Instant::now() }
+
 /// A single distance vector route entry.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DvRoute {
@@ -31,10 +33,12 @@ pub struct DvRoute {
     /// Next hop peer ID
     pub next_hop: String,
     /// When this route was last updated
+    #[serde(skip, default = "instant_now")]
     pub last_updated: Instant,
     /// Whether this route is in hold-down
     pub hold_down: bool,
     /// Hold-down expiry time
+    #[serde(skip, default)]
     pub hold_down_until: Option<Instant>,
     /// Route flags
     pub flags: RouteFlags,

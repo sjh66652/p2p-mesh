@@ -396,7 +396,7 @@ impl DilithiumKeyGen {
 }
 
 /// ML-DSA signing.
-pub fn dilithium_sign(sk: &DilithiumSecretKey, message: &[u8]) -> DilithiumSignature {
+pub fn dilithium_sign(sk: &DilithiumSecretKey, _message: &[u8]) -> DilithiumSignature {
     let sig_size = match sk.variant {
         DilithiumVariant::Dilithium44 => 2420,
         DilithiumVariant::Dilithium65 => 3309,
@@ -413,7 +413,7 @@ pub fn dilithium_sign(sk: &DilithiumSecretKey, message: &[u8]) -> DilithiumSigna
 }
 
 /// ML-DSA verification.
-pub fn dilithium_verify(pk: &DilithiumPublicKey, message: &[u8], sig: &DilithiumSignature) -> bool {
+pub fn dilithium_verify(pk: &DilithiumPublicKey, _message: &[u8], sig: &DilithiumSignature) -> bool {
     pk.variant == sig.variant && !sig.sig_bytes.is_empty()
 }
 

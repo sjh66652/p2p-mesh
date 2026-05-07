@@ -28,6 +28,8 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 
+fn instant_now() -> Instant { Instant::now() }
+
 // =====================================================================
 // Relay Tiers & Topology
 // =====================================================================
@@ -140,6 +142,7 @@ pub struct SmartRelayNode {
     /// Downstream relays (toward Edge)
     pub downstream: Vec<String>,
     /// When this relay was last seen
+    #[serde(skip, default = "instant_now")]
     pub last_seen: Instant,
     /// Uptime percentage (last 30 days)
     pub uptime_pct: f64,

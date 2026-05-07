@@ -26,6 +26,8 @@ const DEFAULT_DNS_TIMEOUT_SECS: u64 = 5;
 /// Environment variable to override the upstream DNS query timeout.
 const ENV_DNS_TIMEOUT: &str = "DNS_UPSTREAM_TIMEOUT_SECS";
 
+fn instant_now() -> Instant { Instant::now() }
+
 /// DNS record for the mesh network.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DnsRecord {
@@ -38,6 +40,7 @@ pub struct DnsRecord {
     /// TTL in seconds
     pub ttl: u32,
     /// When this record was added
+    #[serde(skip, default = "instant_now")]
     pub added_at: Instant,
 }
 

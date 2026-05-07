@@ -72,7 +72,7 @@ chrono = "0.4"
 
 # QUIC Transport
 quinn = "0.11"
-rustls = { version = "0.23", features = ["ring"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 rcgen = { version = "0.13" }
 
 # Fast random number generation (small, no_std compatible)

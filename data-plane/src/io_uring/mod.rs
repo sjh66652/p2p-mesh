@@ -472,13 +472,13 @@ impl IoUringEngine {
                     flags: CompletionFlags::default(),
                     completed_at: Instant::now(),
                 };
+                self.recent_cqes.push_back(cqe.clone());
                 results.push(cqe);
                 self.completions.fetch_add(1, Ordering::Relaxed);
 
                 if self.recent_cqes.len() >= 256 {
                     self.recent_cqes.pop_front();
                 }
-                self.recent_cqes.push_back(cqe.clone());
             }
         }
 

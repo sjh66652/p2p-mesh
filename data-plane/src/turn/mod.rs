@@ -498,7 +498,7 @@ mod tests {
         server.add_credential("testuser", "testpass").await;
 
         let client_addr = "127.0.0.1:12345".parse().unwrap();
-        let resp = server.handle_allocate(
+        let _resp = server.handle_allocate(
             client_addr, "testuser", "testpass",
             Some(Duration::from_secs(0)), // Expires immediately
         ).await.unwrap();

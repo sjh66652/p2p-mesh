@@ -14,6 +14,8 @@ use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
 use serde::{Deserialize, Serialize};
 
+fn instant_now() -> Instant { Instant::now() }
+
 /// A single network path between two peers.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NetworkPath {
@@ -34,8 +36,10 @@ pub struct NetworkPath {
     /// Priority score (higher = more preferred)
     pub score: f64,
     /// Created timestamp
+    #[serde(skip, default = "instant_now")]
     pub created_at: Instant,
     /// Last activity timestamp
+    #[serde(skip, default = "instant_now")]
     pub last_active: Instant,
     /// Number of consecutive failures
     pub failures: u32,
@@ -77,7 +81,7 @@ pub enum PathState {
     Removed,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PathMetrics {
     /// Smoothed RTT (microseconds)
     pub rtt_us: u64,
@@ -90,7 +94,21 @@ pub struct PathMetrics {
     /// MOS (Mean Opinion Score) 1.0-5.0
     pub mos: f64,
     /// Last update timestamp
+    #[serde(skip, default = "instant_now")]
     pub updated_at: Instant,
+}
+
+impl Default for PathMetrics {
+    fn default() -> Self {
+        Self {
+            rtt_us: 0,
+            loss_rate: 0.0,
+            jitter_us: 0,
+            bandwidth_bps: 0,
+            mos: 0.0,
+            updated_at: Instant::now(),
+        }
+    }
 }
 
 /// Path Selection Engine.

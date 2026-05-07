@@ -19,7 +19,7 @@ use chacha20poly1305::{
 };
 use rand::RngCore;
 use sha2::{Digest, Sha256};
-use x25519_dalek::{EphemeralSecret, PublicKey};
+use x25519_dalek::{EphemeralSecret, PublicKey, StaticSecret};
 use zeroize::Zeroize;
 
 /// A symmetric session key for data plane encryption.
@@ -76,7 +76,7 @@ pub struct EcdhKeypair {
 impl EcdhKeypair {
     /// Generate a new ephemeral X25519 keypair.
     pub fn generate() -> Self {
-        let secret = EphemeralSecret::random_from_rng(rand::thread_rng());
+        let secret = EphemeralSecret::new(rand::thread_rng());
         let public = PublicKey::from(&secret);
         Self { secret, public }
     }
@@ -186,8 +186,11 @@ mod tests {
         let alice = EcdhKeypair::generate();
         let bob = EcdhKeypair::generate();
 
-        let alice_shared = alice.agree(&bob.public_key_bytes());
-        let bob_shared = bob.agree(&alice.public_key_bytes());
+        let alice_pk = alice.public_key_bytes();
+        let bob_pk = bob.public_key_bytes();
+
+        let alice_shared = alice.agree(&bob_pk);
+        let bob_shared = bob.agree(&alice_pk);
 
         assert_eq!(alice_shared, bob_shared);
 

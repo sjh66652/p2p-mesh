@@ -14,13 +14,17 @@ use std::time::Instant;
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 
+fn instant_now() -> Instant { Instant::now() }
+
 /// A single link in the topology graph.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TopologyLink {
     pub source: String,
     pub target: String,
     pub link_type: LinkType,
+    #[serde(skip, default = "instant_now")]
     pub created_at: Instant,
+    #[serde(skip, default = "instant_now")]
     pub last_heartbeat: Instant,
     pub metrics: LinkMetrics,
     pub capacity: LinkCapacity,
@@ -66,7 +70,9 @@ pub struct TopologyNode {
     pub public_addr: Option<SocketAddr>,
     pub node_type: NodeType,
     pub capabilities: NodeCapabilities,
+    #[serde(skip, default = "instant_now")]
     pub first_seen: Instant,
+    #[serde(skip, default = "instant_now")]
     pub last_seen: Instant,
     pub online: bool,
 }

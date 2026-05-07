@@ -26,11 +26,11 @@ use chacha20poly1305::{
 };
 use rand::RngCore;
 use sha2::{Digest, Sha256};
-use x25519_dalek::{EphemeralSecret, PublicKey};
-use zeroize::ZeroizeOnDrop;
+use x25519_dalek::{EphemeralSecret, PublicKey, StaticSecret};
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 /// Noise handshake state.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Zeroize)]
 pub enum HandshakeState {
     /// Waiting to start handshake
     Init,
@@ -65,21 +65,33 @@ pub struct NoiseIKHandshake {
 
 /// Noise static keypair.
 pub struct NoiseStaticKeypair {
-    secret: EphemeralSecret,
+    secret: StaticSecret,
     public: PublicKey,
+}
+
+impl Zeroize for NoiseStaticKeypair {
+    fn zeroize(&mut self) {
+        self.secret.zeroize();
+        // PublicKey doesn't contain sensitive material, but zero it for hygiene
+        // PublicKey doesn't implement Zeroize, so we zero the underlying bytes
+        let bytes = self.public.as_bytes();
+        // We can't zeroize PublicKey directly since it doesn't implement Zeroize
+        // Instead, just drop and recreate — sensitive material is in the secret only
+        let _ = bytes; // PublicKey is public by definition, no need to zeroize
+    }
 }
 
 impl NoiseStaticKeypair {
     /// Generate a new static X25519 keypair.
     pub fn generate() -> Self {
-        let secret = EphemeralSecret::random();
+        let secret = StaticSecret::random_from_rng(rand::thread_rng());
         let public = PublicKey::from(&secret);
         Self { secret, public }
     }
 
     /// Create from existing 32-byte secret key.
     pub fn from_secret(secret_bytes: &[u8; 32]) -> Self {
-        let secret = EphemeralSecret::from(*secret_bytes);
+        let secret = StaticSecret::from(*secret_bytes);
         let public = PublicKey::from(&secret);
         Self { secret, public }
     }
@@ -91,7 +103,7 @@ impl NoiseStaticKeypair {
 
     /// Get the 32-byte secret key.
     pub fn secret_key_bytes(&self) -> [u8; 32] {
-        *self.secret.as_ref()
+        self.secret.to_bytes()
     }
 }
 
@@ -130,7 +142,7 @@ impl NoiseIKHandshake {
         }
 
         // Generate ephemeral keypair
-        let ephemeral_secret = EphemeralSecret::random_from_rng(rand::thread_rng());
+        let ephemeral_secret = EphemeralSecret::new(rand::thread_rng());
         let ephemeral_public = PublicKey::from(&ephemeral_secret);
         let ephemeral_public_bytes = *ephemeral_public.as_bytes();
 
@@ -328,7 +340,7 @@ impl NoiseIKHandshake {
         let init_ephemeral = PublicKey::from(self.peer_ephemeral_public);
 
         // Generate responder's ephemeral keypair
-        let resp_ephemeral_secret = EphemeralSecret::random_from_rng(rand::thread_rng());
+        let resp_ephemeral_secret = EphemeralSecret::new(rand::thread_rng());
         let resp_ephemeral_public = PublicKey::from(&resp_ephemeral_secret);
         let resp_ephemeral_bytes = *resp_ephemeral_public.as_bytes();
 

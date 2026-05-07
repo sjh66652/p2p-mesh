@@ -238,7 +238,7 @@ impl ConnectivityManager {
         socket: &Arc<UdpSocket>,
     ) -> Vec<String> {
         let mut dead_peers = Vec::new();
-        let mut peer_ids_to_check: Vec<String> = {
+        let peer_ids_to_check: Vec<String> = {
             let peers = self.peers.read().await;
             peers.keys().cloned().collect()
         };
@@ -269,8 +269,8 @@ impl ConnectivityManager {
                         let mut buf = [0u8; 1500];
 
                         match tokio::time::timeout(timeout, socket.recv_from(&mut buf)).await {
-                            Ok(Ok((n, src))) => {
-                                let start = peer.last_success.map(|t| t.elapsed());
+                            Ok(Ok((n, _src))) => {
+                                let _start = peer.last_success.map(|t| t.elapsed());
                                 // Verify it's a STUN Binding Success Response
                                 if n >= 20 && buf[0] == 0x01 && buf[1] == 0x01 {
                                     let rtt = Instant::now().duration_since(

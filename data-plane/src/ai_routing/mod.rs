@@ -19,9 +19,12 @@ use std::time::Instant;
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 
+fn instant_now() -> Instant { Instant::now() }
+
 /// Time series data point for path metrics.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MetricPoint {
+    #[serde(skip, default = "instant_now")]
     pub timestamp: Instant,
     pub rtt_us: u64,
     pub loss_rate: f64,

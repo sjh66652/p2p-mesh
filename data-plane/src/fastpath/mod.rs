@@ -209,7 +209,7 @@ impl FastPath {
     }
 
     /// Submit a packet for fast-path processing.
-    pub async fn submit_packet(&self, dst: SocketAddr, payload: &[u8]) -> Result<(), FastPathError> {
+    pub async fn submit_packet(&self, _dst: SocketAddr, payload: &[u8]) -> Result<(), FastPathError> {
         if payload.len() > self.config.max_payload_size {
             return Err(FastPathError::PacketTooLarge);
         }

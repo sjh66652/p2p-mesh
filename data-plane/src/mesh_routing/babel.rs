@@ -53,6 +53,8 @@ pub struct BabelNeighbor {
     pub seqno: SeqNo,
 }
 
+fn instant_now() -> Instant { Instant::now() }
+
 /// A Babel route entry.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BabelRoute {
@@ -71,8 +73,10 @@ pub struct BabelRoute {
     /// Whether this route is selected (in routing table)
     pub selected: bool,
     /// When this route was last updated
+    #[serde(skip, default = "instant_now")]
     pub updated: Instant,
     /// Route expiry time
+    #[serde(skip, default = "instant_now")]
     pub expires: Instant,
     /// Whether this is a retracted route
     pub retracted: bool,

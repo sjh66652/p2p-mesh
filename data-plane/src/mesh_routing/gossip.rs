@@ -19,6 +19,8 @@ use rand::Rng;
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 
+fn instant_now() -> Instant { Instant::now() }
+
 /// Maximum gossip message size (payload).
 const MAX_GOSSIP_PAYLOAD: usize = 1400;
 
@@ -44,6 +46,7 @@ pub struct GossipMember {
     pub addr: SocketAddr,
     pub state: MemberState,
     pub incarnation: u64,
+    #[serde(skip, default = "instant_now")]
     pub last_changed: Instant,
     pub metadata: HashMap<String, String>,
 }
@@ -202,7 +205,7 @@ impl GossipProtocol {
                     member.last_changed = Instant::now();
                 }
             }
-            GossipMessage::IndirectPing { seq_num, target, requester } => {
+            GossipMessage::IndirectPing { seq_num, target, requester: _ } => {
                 // Forward ping to target on behalf of requester
                 if target != self.our_id {
                     return Some(GossipMessage::Ping { seq_num, target });
@@ -230,7 +233,7 @@ impl GossipProtocol {
                     }
                 }
             }
-            GossipMessage::TopologyChange { link_id, change_type, metadata } => {
+            GossipMessage::TopologyChange { link_id, change_type, metadata: _ } => {
                 log::info!("Gossip: Topology change: {} {}", change_type, link_id);
             }
             GossipMessage::RelayElection { region, relays } => {
