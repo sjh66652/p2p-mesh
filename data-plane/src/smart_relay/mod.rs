@@ -38,7 +38,6 @@ fn instant_now() -> Instant { Instant::now() }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 pub enum RelayTier {
     #[default]
-    Edge,
     /// End-user facing, lowest latency, many instances
     Edge,
     /// Regional aggregation, medium latency

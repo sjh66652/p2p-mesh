@@ -26,7 +26,7 @@ use chacha20poly1305::{
 };
 use rand::RngCore;
 use sha2::{Digest, Sha256};
-use x25519_dalek::{PublicKey, EphemeralSecret};
+use x25519_dalek::{PublicKey, EphemeralSecret, ReusableSecret};
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 /// Noise handshake state.
@@ -53,9 +53,9 @@ pub struct NoiseIKHandshake {
     /// Our ephemeral keypair (generated per-handshake, zeroed on drop).
     /// On initiator side: stores the initiator's ephemeral secret for ee/se DH.
     /// On responder side: stores the responder's ephemeral secret after generation.
-    /// Uses EphemeralSecret (not EphemeralSecret) because the same secret must
+    /// Uses ReusableSecret because the same secret must
     /// be used for multiple diffie_hellman calls (es then later ee/se).
-    ephemeral_secret: Option<EphemeralSecret>,
+    ephemeral_secret: Option<ReusableSecret>,
     /// Peer's ephemeral public key (set during handshake processing).
     /// Used for DH operations against the remote party's ephemeral key.
     peer_ephemeral_public: [u8; 32],
@@ -67,7 +67,7 @@ pub struct NoiseIKHandshake {
 
 /// Noise static keypair.
 pub struct NoiseStaticKeypair {
-    secret: EphemeralSecret,
+    secret: ReusableSecret,
     public: PublicKey,
 }
 
@@ -86,14 +86,14 @@ impl Zeroize for NoiseStaticKeypair {
 impl NoiseStaticKeypair {
     /// Generate a new static X25519 keypair.
     pub fn generate() -> Self {
-        let secret = EphemeralSecret::random_from_rng(rand::thread_rng());
+        let secret = ReusableSecret::random_from_rng(rand::thread_rng());
         let public = PublicKey::from(&secret);
         Self { secret, public }
     }
 
     /// Create from existing 32-byte secret key.
     pub fn from_secret(secret_bytes: &[u8; 32]) -> Self {
-        let secret = EphemeralSecret::from(*secret_bytes);
+        let secret = ReusableSecret::from(*secret_bytes);
         let public = PublicKey::from(&secret);
         Self { secret, public }
     }
@@ -145,7 +145,7 @@ impl NoiseIKHandshake {
 
         // Generate ephemeral keypair using EphemeralSecret so the same secret
         // can be used for es DH now and ee/se DH later in process_responder_message.
-        let ephemeral_secret = EphemeralSecret::random_from_rng(rand::thread_rng());
+        let ephemeral_secret = ReusableSecret::random_from_rng(rand::thread_rng());
         let ephemeral_public = PublicKey::from(&ephemeral_secret);
         let ephemeral_public_bytes = *ephemeral_public.as_bytes();
 
@@ -346,7 +346,7 @@ impl NoiseIKHandshake {
 
         // Generate responder's ephemeral keypair using EphemeralSecret so
         // the same secret can be used in multiple diffie_hellman calls if needed.
-        let resp_ephemeral_secret = EphemeralSecret::random_from_rng(rand::thread_rng());
+        let resp_ephemeral_secret = ReusableSecret::random_from_rng(rand::thread_rng());
         let resp_ephemeral_public = PublicKey::from(&resp_ephemeral_secret);
         let resp_ephemeral_bytes = *resp_ephemeral_public.as_bytes();
 
