@@ -2,8 +2,6 @@
 
 Production-grade P2P mesh networking — Python control plane, Rust data plane, 5 microservices, distributed WebSocket signaling, 10-phase data plane roadmap (TUN routing through post-quantum crypto).
 
-**Audited:** 3 rounds (May 2026). 60+ findings. Zero critical or high issues open.
-
 ---
 
 ## Architecture
@@ -324,13 +322,3 @@ p2p-mesh/
 | Kubernetes | 500+ users | `kubectl apply -k deployment/k8s/microservices/` |
 
 ---
-
-## Audit History
-
-| Date | Round | Scope | Outcome |
-|------|-------|-------|---------|
-| 2026-05-08 | Third | GitHub code-review re-audit — 24 issues | All resolved |
-| 2026-05-08 | Second | Full codebase (172 files) — 17 issues | All resolved |
-| 2026-05-07 | First | Phase 3 security audit — 18 issues | All resolved |
-
-Full details: [SECURITY.md](./SECURITY.md) · [AUDIT-2026-05-08.md](./AUDIT-2026-05-08.md)

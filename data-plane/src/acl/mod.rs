@@ -133,6 +133,23 @@ pub struct AclEngine {
     device_ips: RwLock<HashMap<String, Ipv4Addr>>,
 }
 
+/// Check if a device belongs to a named group.
+///
+/// Handles special group names "any" and "*" as wildcards.
+/// Consults the groups map for actual group membership.
+fn device_in_group(device_id: &str, group_name: &str, groups: &HashMap<String, Vec<String>>) -> bool {
+    if group_name == "any" || group_name == "*" {
+        return true;
+    }
+    if device_id == group_name {
+        return true;
+    }
+    if let Some(members) = groups.get(group_name) {
+        return members.iter().any(|m| m == device_id);
+    }
+    false
+}
+
 impl AclEngine {
     /// Create a new ACL engine with default-deny policy.
     pub fn new() -> Self {
@@ -248,24 +265,6 @@ impl AclEngine {
 
         true
     }
-
-/// Check if a device belongs to a named group.
-///
-/// Handles special group names "any" and "*" as wildcards.
-/// Consults the groups map for actual group membership.
-fn device_in_group(device_id: &str, group_name: &str, groups: &HashMap<String, Vec<String>>) -> bool {
-    if group_name == "any" || group_name == "*" {
-        return true;
-    }
-    if device_id == group_name {
-        return true;
-    }
-    // Check actual group membership
-    if let Some(members) = groups.get(group_name) {
-        return members.iter().any(|m| m == device_id);
-    }
-    false
-}
 
     /// Get the current policy for inspection.
     pub async fn get_policy(&self) -> AclPolicy {

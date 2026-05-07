@@ -353,8 +353,8 @@ impl DpdkManager {
 
         // Spawn a dedicated task simulating the PMD poll loop
         let handle = tokio::spawn(async move {
-            let mut pps_counter = 0u64;
-            let mut bps_counter = 0u64;
+            let mut _pps_counter = 0u64;
+            let mut _bps_counter = 0u64;
             let tick = tokio::time::Duration::from_secs(1);
             let mut interval = tokio::time::interval(tick);
 
@@ -362,8 +362,8 @@ impl DpdkManager {
                 interval.tick().await;
                 // In production: rte_eth_rx_burst() / rte_eth_tx_burst()
                 // For now, simulate stats accumulation
-                pps_counter += 0;
-                bps_counter += 0;
+                _pps_counter += 0;
+                _bps_counter += 0;
             }
         });
 
@@ -437,7 +437,7 @@ impl BatchProcessor {
 
     /// Process an incoming burst of packets.
     /// Returns the number of packets processed.
-    pub fn process_burst(&self, packet_count: usize, total_bytes: usize) -> u64 {
+    pub fn process_burst(&self, packet_count: usize, _total_bytes: usize) -> u64 {
         self.batches_processed.fetch_add(1, Ordering::Relaxed);
         self.packets_processed.fetch_add(packet_count as u64, Ordering::Relaxed);
         packet_count as u64

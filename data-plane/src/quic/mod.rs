@@ -50,7 +50,7 @@ impl QuicTransport {
         )?;
         let mut client_config = quinn::ClientConfig::new(Arc::new(quic_client_config));
         let mut transport = TransportConfig::default();
-        transport.max_idle_timeout(Some(Duration::from_secs(30).try_into().unwrap_or(VarInt::MAX)));
+        transport.max_idle_timeout(Some(Duration::from_secs(30).try_into().unwrap_or(VarInt::from_u32(0))));
         transport.keep_alive_interval(Some(Duration::from_secs(10)));
         transport.max_concurrent_bidi_streams(100u32.into());
         transport.send_window(8 * 1024 * 1024);
@@ -129,7 +129,7 @@ fn configure_server(
     let quic_config = quinn::crypto::rustls::QuicServerConfig::try_from(Arc::new(server_crypto))?;
     let mut server_config = quinn::ServerConfig::with_crypto(Arc::new(quic_config));
     let mut transport = TransportConfig::default();
-    transport.max_idle_timeout(Some(Duration::from_secs(30).try_into().unwrap_or(VarInt::MAX)));
+    transport.max_idle_timeout(Some(Duration::from_secs(30).try_into().unwrap_or(VarInt::from_u32(0))));
     transport.keep_alive_interval(Some(Duration::from_secs(10)));
     transport.max_concurrent_bidi_streams(100u32.into());
     transport.send_window(8 * 1024 * 1024);

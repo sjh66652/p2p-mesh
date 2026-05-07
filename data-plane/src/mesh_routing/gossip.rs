@@ -188,6 +188,7 @@ impl GossipProtocol {
         msg: GossipMessage,
         from_addr: SocketAddr,
     ) -> Option<GossipMessage> {
+        let _ = from_addr;
         match msg {
             GossipMessage::Ping { seq_num, target } => {
                 if target == self.our_id {
@@ -197,7 +198,7 @@ impl GossipProtocol {
                     });
                 }
             }
-            GossipMessage::Ack { seq_num, source } => {
+            GossipMessage::Ack { seq_num: _, source } => {
                 // Confirmed reachability
                 let mut members = self.members.write().await;
                 if let Some(member) = members.get_mut(&source) {
@@ -315,7 +316,7 @@ mod tests {
             metadata: HashMap::new(),
         }).await;
 
-        let (ping_msg, target) = gp.build_ping().await.unwrap();
+        let (_, target) = gp.build_ping().await.unwrap();
         assert_eq!(target, "node-b");
     }
 

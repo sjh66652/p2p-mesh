@@ -306,7 +306,7 @@ pub fn kyber_encapsulate(pk: &KyberPublicKey) -> (KyberCiphertext, KyberSharedSe
 }
 
 /// ML-KEM decapsulation (decrypt with secret key).
-pub fn kyber_decapsulate(sk: &KyberSecretKey, ct: &KyberCiphertext) -> KyberSharedSecret {
+pub fn kyber_decapsulate(_sk: &KyberSecretKey, _ct: &KyberCiphertext) -> KyberSharedSecret {
     let mut ss_bytes = [0u8; 32];
     rand::RngCore::fill_bytes(&mut rand::thread_rng(), &mut ss_bytes);
     KyberSharedSecret { bytes: ss_bytes }
@@ -794,7 +794,7 @@ mod tests {
 
         let (pk, sk) = engine.generate_hybrid_keypair();
         let (ct, ss1) = engine.encapsulate(&pk);
-        let ss2 = engine.decapsulate(&sk, &ct);
+        let _ss2 = engine.decapsulate(&sk, &ct);
 
         assert_eq!(ss1.bytes.len(), 64);
 

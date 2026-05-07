@@ -184,7 +184,7 @@ pub async fn hole_punch(
 /// Probe NAT type by querying multiple STUN servers.
 /// Returns the NAT classification string.
 pub async fn probe_nat_type(
-    socket: &UdpSocket,
+    _socket: &UdpSocket,
     stun_servers: &[String],
 ) -> stun::NatClassification {
     if stun_servers.is_empty() {

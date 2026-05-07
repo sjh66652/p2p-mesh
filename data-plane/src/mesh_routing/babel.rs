@@ -131,7 +131,7 @@ impl BabelProtocol {
     }
 
     /// Build an IHU (I Heard You) message.
-    pub fn build_ihu(&self, neighbor_id: RouterId, rxcost: u16) -> BabelMessage {
+    pub fn build_ihu(&self, _neighbor_id: RouterId, rxcost: u16) -> BabelMessage {
         BabelMessage {
             msg_type: BabelMsgType::Ihu,
             router_id: self.router_id,

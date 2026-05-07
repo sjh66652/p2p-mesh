@@ -19,7 +19,7 @@ use chacha20poly1305::{
 };
 use rand::RngCore;
 use sha2::{Digest, Sha256};
-use x25519_dalek::{EphemeralSecret, PublicKey, ReusableSecret};
+use x25519_dalek::{EphemeralSecret, PublicKey, StaticSecret};
 use zeroize::Zeroize;
 
 /// A symmetric session key for data plane encryption.

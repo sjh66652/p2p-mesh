@@ -80,7 +80,7 @@ impl RelayTier {
 }
 
 /// Geographic coordinates for relay placement.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct GeoLocation {
     pub latitude: f64,
     pub longitude: f64,
@@ -119,7 +119,7 @@ impl GeoLocation {
 // =====================================================================
 
 /// A single relay node in the smart relay network.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct SmartRelayNode {
     /// Unique relay identifier
     pub id: String,
@@ -151,7 +151,7 @@ pub struct SmartRelayNode {
 }
 
 /// Relay capacity specifications.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RelayCapacity {
     /// Maximum bandwidth (bps)
     pub max_bandwidth_bps: u64,
@@ -168,7 +168,7 @@ pub struct RelayCapacity {
 }
 
 /// Relay load metrics.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct RelayLoad {
     /// Current bandwidth usage (bps)
     pub bandwidth_bps: u64,
@@ -406,7 +406,7 @@ impl LoadPredictor {
         }
 
         // Simple EWMA-based prediction
-        let n = self.history.len();
+        let _n = self.history.len();
         let mut bw_ewma = 0.0f64;
         let mut conn_ewma = 0.0f64;
         let mut pps_ewma = 0.0f64;
@@ -690,7 +690,7 @@ impl SmartRelayManager {
         &self,
         src_location: GeoLocation,
         dst_location: GeoLocation,
-        bandwidth_bps: u64,
+        _bandwidth_bps: u64,
     ) -> Option<Vec<String>> {
         let relays = self.relays.read().await;
 

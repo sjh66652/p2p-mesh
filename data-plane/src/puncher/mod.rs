@@ -219,10 +219,10 @@ pub async fn execute_punch(
     hmac_key: &[u8],
     peer_id: &str,
     our_device_id: &str,
-    our_candidates: &[Candidate],
+    _our_candidates: &[Candidate],
     peer_candidates: &[Candidate],
     timeout: Duration,
-    relay_addr: Option<SocketAddr>,
+    _relay_addr: Option<SocketAddr>,
 ) -> Result<SocketAddr, String> {
     if peer_candidates.is_empty() {
         return Err("No peer candidates to punch".to_string());

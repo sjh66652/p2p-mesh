@@ -10,7 +10,8 @@
 //!
 //! Uses the `tun` crate which wraps OS-specific TUN/TAP ioctls.
 
-use std::io::{self, Read, Write};
+use std::io;
+use std::os::fd::AsRawFd;
 
 use tokio::io::unix::AsyncFd;
 
@@ -141,18 +142,21 @@ impl TunInterface {
     /// Returns the raw IP packet bytes, or None if the device is closed.
     pub async fn read_packet(&self) -> io::Result<Vec<u8>> {
         let mut buf = vec![0u8; 65536];
-        // Use tokio's async I/O wrapper
         let mut guard = self.async_fd.readable().await?;
-        match guard.get_ref().read(&mut buf) {
-            Ok(n) => {
-                buf.truncate(n);
-                Ok(buf)
+        let fd = guard.get_ref().as_raw_fd();
+        loop {
+            let n = unsafe { libc::read(fd, buf.as_mut_ptr() as *mut libc::c_void, buf.len()) };
+            if n < 0 {
+                let err = io::Error::last_os_error();
+                if err.kind() == io::ErrorKind::WouldBlock {
+                    guard.clear_ready();
+                    guard = self.async_fd.readable().await?;
+                    continue;
+                }
+                return Err(err);
             }
-            Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
-                guard.clear_ready();
-                Err(e)
-            }
-            Err(e) => Err(e),
+            buf.truncate(n as usize);
+            return Ok(buf);
         }
     }
 
@@ -162,13 +166,19 @@ impl TunInterface {
     /// from a real network interface.
     pub async fn write_packet(&self, packet: &[u8]) -> io::Result<usize> {
         let mut guard = self.async_fd.writable().await?;
-        match guard.get_ref().write(packet) {
-            Ok(n) => Ok(n),
-            Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
-                guard.clear_ready();
-                Err(e)
+        let fd = guard.get_ref().as_raw_fd();
+        loop {
+            let n = unsafe { libc::write(fd, packet.as_ptr() as *const libc::c_void, packet.len()) };
+            if n < 0 {
+                let err = io::Error::last_os_error();
+                if err.kind() == io::ErrorKind::WouldBlock {
+                    guard.clear_ready();
+                    guard = self.async_fd.writable().await?;
+                    continue;
+                }
+                return Err(err);
             }
-            Err(e) => Err(e),
+            return Ok(n as usize);
         }
     }
 }

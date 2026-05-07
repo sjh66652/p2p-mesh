@@ -461,7 +461,7 @@ mod tests {
         degraded.state = PathState::Degraded;
         selector.add_path("peer1", degraded).await;
 
-        let mut good = make_test_path("v4-relay", IpVersion::V4, PathType::Relay, 50);
+        let good = make_test_path("v4-relay", IpVersion::V4, PathType::Relay, 50);
         selector.add_path("peer1", good).await;
 
         let best = selector.select_best_path("peer1").await;

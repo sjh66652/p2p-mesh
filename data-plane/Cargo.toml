@@ -11,6 +11,9 @@ tokio = { version = "1", features = ["full"] }
 # TUN/TAP virtual network interface
 tun = "0.6"
 
+# libc bindings for raw file descriptor I/O
+libc = "0.2"
+
 # IP network types (CIDR, IpNet)
 ipnet = { version = "2", features = ["serde"] }
 

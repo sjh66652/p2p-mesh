@@ -302,7 +302,7 @@ impl IceAgent {
             for r in remote.iter() {
                 // Must be same IP version
                 if l.addr.is_ipv4() == r.addr.is_ipv4() {
-                    let priority = Self::pair_priority(l.priority, r.priority);
+                    let _priority = Self::pair_priority(l.priority, r.priority);
                     pairs_vec.push(CandidatePair {
                         local: l.clone(),
                         remote: r.clone(),

@@ -64,13 +64,12 @@ impl PathPredictor {
 
     /// Feed a new data point and update the model.
     pub fn update(&mut self, point: MetricPoint) {
+        let rtt = point.rtt_us as f64;
+        let loss = point.loss_rate;
         self.history.push_back(point);
         if self.history.len() > 64 {
             self.history.pop_front();
         }
-
-        let rtt = point.rtt_us as f64;
-        let loss = point.loss_rate;
 
         // EWMA update (α = 0.2 for RTT, 0.1 for loss)
         if self.samples_trained == 0 {
