@@ -49,28 +49,34 @@ p2p-mesh/
 │   │   ├── audit.py                    # Audit logging
 │   │   └── tracing.py                  # OpenTelemetry setup
 │   ├── auth-service/                   # Authentication & authorization
-│   │   ├── app/main.py, config.py, database.py
-│   │   ├── app/models.py, schemas.py
-│   │   ├── app/service.py, dependencies.py, api.py
-│   │   ├── requirements.txt, Dockerfile
 │   ├── user-service/                   # User profiles & device management
-│   │   └── (same structure as auth-service)
 │   ├── signaling-service/              # WebSocket signaling (Redis Pub/Sub)
-│   │   ├── app/pubsub.py               # Distributed signaling via Redis
-│   │   └── (same structure)
 │   ├── relay-service/                  # Relay node management & traffic
-│   │   └── (same structure)
 │   ├── usage-service/                  # Quota management & rate limiting
-│   │   └── (same structure)
 │   └── worker/                         # Background task worker
-│       └── app/worker.py, config.py
-├── control-plane/                      # Legacy monolith (kept for reference)
+├── control-plane/                      # Legacy monolith (FastAPI)
+│   ├── app/
+│   │   ├── api/candidates.py           # Candidate registration REST API
+│   │   ├── api/ws.py                   # WebSocket signaling (6 msg types)
+│   │   ├── schemas/candidate.py        # Pydantic candidate models
+│   │   └── services/nat_utils.py       # NAT compatibility matrix
+│   └── main.py
 ├── data-plane/                         # Rust high-performance core
 │   ├── Cargo.toml
 │   └── src/
+│       ├── bin/
+│       │   ├── mesh-stun.rs            # STUN server (UDP 3478)
+│       │   ├── mesh-tunnel.rs          # P2P tunnel client endpoint
+│       │   └── mesh-relay.rs           # Relay forwarding node
 │       ├── crypto/mod.rs               # ChaCha20-Poly1305 AEAD
-│       ├── tunnel/mod.rs, main.rs      # mesh-tunnel binary
-│       └── relay/mod.rs, main.rs       # mesh-relay binary
+│       ├── stun/mod.rs                 # STUN client + NAT classification
+│       ├── puncher/mod.rs              # UDP hole punching (HELLO/ACK)
+│       ├── tunnel/mod.rs               # P2P tunnel management
+│       ├── quic/mod.rs                 # QUIC transport (quinn + rustls)
+│       ├── multipath/mod.rs            # Multi-path routing (Direct/Relay)
+│       ├── metrics/mod.rs              # EWMA network quality metrics
+│       ├── relay/mod.rs                # Zero-trust relay forwarding
+│       └── lib.rs                      # Public module declarations
 ├── deployment/
 │   ├── docker-compose.microservices.yml    # 12-container dev stack
 │   ├── docker-compose.microservices.prod.yml # Production version
@@ -98,7 +104,8 @@ p2p-mesh/
 │       └── dashboards/p2p-mesh-overview.json
 ├── scripts/
 │   ├── setup-server.sh                 # VPS one-click setup
-│   └── verify.sh                       # Deployment verification
+│   ├── verify.sh                       # Deployment verification
+│   └── verify-upgrade.sh               # Phase 1+2 upgrade verification (6 check sections)
 ├── .github/workflows/deploy.yml        # CI/CD (matrix build for 6 services)
 ├── .env.prod.example                   # Production env template
 ├── PRODUCTION.md                       # Production deployment guide
@@ -177,7 +184,9 @@ curl -X POST http://localhost/api/v1/devices \
 | **Worker** | — | — | — | Background jobs, cleanup, usage aggregation |
 | **PostgreSQL** | 5432 | 127.0.0.1:5432 | — | Primary database (shared) |
 | **Redis** | 6379 | 127.0.0.1:6379 | — | Cache, signaling Pub/Sub, rate limit counters |
+| **STUN (Rust)** | 3478/udp | 3478/udp | — | Public address discovery for NAT traversal |
 | **Relay (Rust)** | 51821/udp | 51821/udp | — | High-performance UDP packet forwarder |
+| **Tunnel (Rust)** | 51820/udp | dynamic | — | P2P client with QUIC + multi-path routing |
 | **Prometheus** | 9090 | 127.0.0.1:9090 | — | Metrics collection |
 | **Grafana** | 3000 | 127.0.0.1:3000 | — | Dashboards & alerting |
 | **Loki** | 3100 | 127.0.0.1:3100 | — | Log aggregation |
@@ -223,6 +232,17 @@ curl -X POST http://localhost/api/v1/devices \
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
 | WS | `/ws/signaling/{device_id}` | JWT | WebSocket signaling connection |
+| WS Msg | `candidates` | JWT | Exchange peer candidate addresses |
+| WS Msg | `stun_result` | JWT | Share STUN-probed public address |
+| WS Msg | `punch_request/result` | JWT | Trigger/acknowledge hole punching |
+| WS Msg | `path_quality` | JWT | Report multi-path quality metrics |
+
+### Candidate Exchange (`/api/v1/candidates/`)
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| POST | `/candidates` | JWT | Register device candidates (host/srflx) |
+| GET | `/candidates/{device_id}` | JWT | Get peer candidates for hole punching |
 
 ### Usage Service (`/api/v1/usage/`)
 
@@ -230,6 +250,37 @@ curl -X POST http://localhost/api/v1/devices \
 |--------|------|------|-------------|
 | GET | `/usage/me` | JWT | Get current usage stats |
 | POST | `/usage/check` | Internal | Check quota for action |
+
+## Data Plane Features
+
+### NAT Traversal (Phase 1)
+
+The data plane implements a complete NAT traversal stack:
+
+1. **STUN Discovery** — Client sends `ping` to STUN server (UDP 3478), receives its public `IP:PORT` mapping
+2. **NAT Classification** — Multi-server STUN probes classify NAT type (Full Cone / Symmetric / etc.)
+3. **Candidate Exchange** — ICE-style candidates exchanged via signaling WebSocket + REST API
+4. **UDP Hole Punching** — Burst of HELLO packets to peer candidates, HELLO_ACK confirms connectivity
+5. **Relay Fallback** — When direct P2P fails (e.g., Symmetric NAT on both sides), traffic routes through relay
+
+### Data Plane Transport (Phase 2)
+
+| Feature | Implementation | Details |
+|---------|---------------|---------|
+| **Transport** | QUIC (RFC 9000) via quinn 0.11 | TLS 1.3, 0-RTT, multiplexed streams, connection migration |
+| **Encryption** | ChaCha20-Poly1305 AEAD | Data plane traffic never decrypted by control plane |
+| **Multi-Path** | Direct / Relay / Local | Auto-selects best path based on RTT, loss, bandwidth |
+| **Quality Metrics** | EWMA-smoothed | RTT (microsecond precision), loss rate %, bandwidth bps |
+| **Relay Auth** | HMAC-SHA256 | Source device ID authentication, per-device rate limiting |
+
+### Path Selection Strategy
+
+```
+Direct P2P (preferred)  →  Relay (fallback)  →  None (unreachable)
+         ↑                        ↑
+  RTT < 300ms threshold    Automatic when
+  loss < 10%               Direct path fails
+```
 
 ## Security
 
@@ -284,18 +335,47 @@ Every microservice exposes `/metrics` in Prometheus format. Key metrics:
 cd data-plane
 cargo build --release
 
-# Run tunnel client
+### mesh-stun — STUN Server (NAT Traversal)
+
+# Start the STUN server (standard port 3478)
+./target/release/mesh-stun --port 3478
+
+# Test: client sends "ping", server responds with public IP:PORT
+echo -n "ping" | nc -u 127.0.0.1 3478
+# Response: 203.0.113.5:51820
+
+### mesh-tunnel — P2P Client Endpoint
+
+# Full-featured client with NAT traversal, QUIC transport, multi-path routing
+export MESH_TOKEN="<jwt-token>"
 ./target/release/mesh-tunnel \
   --api-url http://localhost:8000 \
-  --token "<jwt-token>" \
-  --device-id "<device-uuid>"
+  --ws-url ws://localhost:8000/api/v1/ws \
+  --device-id "<device-uuid>" \
+  --stun-server "stun.local:3478" \
+  --local-port 51820
 
-# Run relay node
+# Steps performed automatically:
+# 1. STUN public address discovery
+# 2. Candidate registration via REST API
+# 3. WebSocket signaling connection
+# 4. UDP hole punching (HELLO/ACK, 10s timeout → relay fallback)
+# 5. QUIC connection establishment (TLS 1.3, ChaCha20-Poly1305 AEAD)
+# 6. Multi-path management (Direct > Relay auto-selection)
+# 7. Periodic traffic/quality metrics reporting
+
+### mesh-relay — Relay Forwarding Node
+
+# Zero-trust packet forwarder (never decrypts traffic)
+export RELAY_AUTH_TOKEN="<relay-auth-token>"
+export RELAY_ID="relay-us-east-1"
+export REGION="us-east"
 ./target/release/mesh-relay \
-  --api-url http://localhost:8000 \
-  --relay-id "relay-us-east-1" \
-  --region "us-east-1"
-```
+  --port 51821 \
+  --max-connections 1000 \
+  --bandwidth-mbps 1000
+
+# Security: HMAC-SHA256 source authentication, per-device rate limiting
 
 ## Deployment Options
 
@@ -346,118 +426,4 @@ After running `docker compose up -d`, you **must** change the following before a
 | `GRAFANA_USER` | `admin` | Optional, but changing adds obscurity |
 | `LOG_LEVEL` | `INFO` | Set to `WARNING` in production to reduce log volume |
 | `DEBUG` | `false` | Must remain `false` in production |
-| `RELAY_ID` | `relay-primary` | Set to a meaningful identifier for your deployment |
-
-### Optional — Tune for Your Environment
-
-| Setting | Location | Notes |
-|---------|----------|-------|
-| CORS origins | `deployment/nginx/nginx.conf` | Replace `*` with your domain whitelist |
-| Rate limits | `deployment/nginx/nginx.conf` lines 44-45 | Adjust `rate=60r/m` for API, `rate=10r/m` for login |
-| SSL certificates | `deployment/nginx/ssl/` | Place your `fullchain.pem` and `privkey.pem` here |
-| Prometheus retention | `docker-compose.microservices.yml` prometheus command | Default 15 days; adjust `--storage.tsdb.retention.time` |
-| Loki retention | `monitoring/loki-config.yaml` | Loki keeps no retention by default; add `retention_period: 720h` |
-| Database port exposure | `docker-compose.microservices.yml` postgres/redis | Remove `ports:` section entirely in production (only expose via internal network) |
-| OpenTelemetry | Each service's `OTEL_*` env vars | Uncomment `OTEL_ENABLED` and `OTEL_EXPORTER_OTLP_ENDPOINT` to enable tracing |
-
-### Kubernetes Deployments — Additional Changes
-
-| File | What to Change |
-|------|---------------|
-| `deployment/k8s/microservices/configmap.yaml` | All placeholder values |
-| `deployment/k8s/microservices/services.yaml` | Image registry, resource limits per service |
-| `deployment/k8s/microservices/ingress.yaml` | Domain name, TLS certificate ARN / secret name |
-| `deployment/k8s/microservices/hpa.yaml` | Min/max replicas per service |
-| `deployment/k8s/microservices/postgres.yaml` | Storage class, size; consider using cloud RDS instead |
-
-### Docker Image Registry
-
-If using a private registry or mirror (e.g., Aliyun for China):
-
-```bash
-# Edit each service's Dockerfile to change the pip mirror
-# Currently: https://mirrors.aliyun.com/pypi/simple/
-
-# For Docker Hub mirror, configure Docker daemon:
-# /etc/docker/daemon.json:
-# { "registry-mirrors": ["https://docker.1ms.run"] }
-```
-
-### Grafana Setup After First Login
-
-1. Login at http://localhost:3000 with credentials from `.env`
-2. Datasources (Prometheus, Loki) are auto-provisioned from `monitoring/grafana/provisioning/`
-3. Import additional dashboards from `monitoring/grafana/dashboards/`
-4. Configure alert notification channels (Slack, email, etc.)
-5. Change the default password immediately
-
-### Firewall Rules
-
-```bash
-# Public-facing ports (must be open):
-#   80/tcp   — HTTP (redirects to 443)
-#   443/tcp  — HTTPS API gateway
-#   51821/udp — Relay node (if running relay)
-
-# Internal-only ports (should NOT be exposed to internet):
-#   5432, 6379, 8000, 9090, 3000, 3100, 16686
-
-# UFW example:
-sudo ufw allow 80/tcp
-sudo ufw allow 443/tcp
-sudo ufw allow 51821/udp
-sudo ufw enable
-```
-
-### Quick Verification Script
-
-```bash
-# Run this after deployment to verify everything works
-bash scripts/verify.sh
-
-# Or manually:
-# 1. Check all containers healthy
-docker compose -f deployment/docker-compose.microservices.yml ps
-
-# 2. Test each service health endpoint
-curl -s http://localhost/health | grep '"status":"healthy"'
-
-# 3. Verify registration flow
-curl -s -X POST http://localhost/api/v1/auth/register \
-  -H "Content-Type: application/json" \
-  -d '{"email":"test@verify.local","password":"Verify123!","name":"Verify"}'
-
-# 4. Check Prometheus targets
-curl -s http://localhost:9090/api/v1/targets | grep '"health":"up"'
-
-# 5. Check Grafana is accessible
-curl -s -o /dev/null -w "%{http_code}" http://localhost:3000
-```
-
----
-
-## Development
-
-### Running a single service locally
-
-```bash
-cd services/auth-service
-cp ../../deployment/.env .env
-pip install -r requirements.txt
-uvicorn app.main:app --reload --port 8001
-```
-
-### Database migrations
-
-Each service manages its own tables via SQLAlchemy `create_all()` on startup. For production, consider using Alembic migrations per service.
-
-### Pre-commit checks
-
-```bash
-# Python
-bandit -r services/ -ll
-pip-audit -r services/auth-service/requirements.txt
-
-# Rust
-cd data-plane && cargo clippy --all-targets -- -D warnings && cargo audit
-```
+|
