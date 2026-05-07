@@ -46,6 +46,12 @@ class SignalingHub:
         self._connections: Dict[uuid.UUID, DeviceConnection] = {}
         # user_id -> set of device_ids
         self._user_devices: Dict[uuid.UUID, Set[uuid.UUID]] = {}
+        # device_id -> list of candidates (for NAT traversal)
+        self._candidates: Dict[uuid.UUID, list] = {}
+        # device_id -> nat_type
+        self._nat_types: Dict[uuid.UUID, str] = {}
+        # device_id -> public_addr
+        self._public_addrs: Dict[uuid.UUID, str] = {}
         self._lock = asyncio.Lock()
 
     async def connect(
@@ -201,6 +207,52 @@ class SignalingHub:
         }
         # Only notify devices of the same user
         await self.broadcast_to_user(user_id, message)
+
+    async def store_candidates(self, device_id: uuid.UUID, candidates: list):
+        """Store network candidates for a device (for NAT hole punching)."""
+        async with self._lock:
+            self._candidates[device_id] = candidates
+        logger.info(f"Stored {len(candidates)} candidates for device {device_id}")
+
+    async def get_peer_candidates(
+        self, requesting_device: uuid.UUID, peer_device: uuid.UUID
+    ) -> list | None:
+        """
+        Get a peer's candidates, verifying same-user authorization.
+
+        Returns the peer's candidate list or None if not authorized/found.
+        """
+        requesting_conn = self._connections.get(requesting_device)
+        peer_conn = self._connections.get(peer_device)
+
+        if not requesting_conn or not peer_conn:
+            return None
+
+        # Only devices belonging to the same user can see each other's candidates
+        if requesting_conn.user_id != peer_conn.user_id:
+            logger.warning(
+                f"Candidate access denied: device {requesting_device} "
+                f"(user {requesting_conn.user_id}) requesting candidates "
+                f"from device {peer_device} (user {peer_conn.user_id})"
+            )
+            return None
+
+        return self._candidates.get(peer_device, [])
+
+    async def update_device_nat(
+        self, device_id: uuid.UUID, nat_type: str, public_addr: str
+    ):
+        """Update a device's NAT type and public address from STUN results."""
+        async with self._lock:
+            self._nat_types[device_id] = nat_type
+            self._public_addrs[device_id] = public_addr
+        logger.debug(
+            f"NAT updated for device {device_id}: type={nat_type}, addr={public_addr}"
+        )
+
+    def get_candidate_count(self, device_id: uuid.UUID) -> int:
+        """Get the number of stored candidates for a device."""
+        return len(self._candidates.get(device_id, []))
 
     @property
     def online_count(self) -> int:

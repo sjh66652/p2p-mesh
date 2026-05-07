@@ -187,7 +187,12 @@ async def handle_signal(
     msg_type = msg.get("type", "")
 
     # Whitelist of allowed message types
-    ALLOWED_TYPES = {"ping", "offer", "answer", "ice_candidate", "get_peers"}
+    # Phase 1 additions: candidates (NAT traversal), stun_result, punch_request
+    ALLOWED_TYPES = {
+        "ping", "offer", "answer", "ice_candidate", "get_peers",
+        "candidates", "candidates_request", "stun_result",
+        "punch_request", "punch_result", "path_quality",
+    }
     if msg_type not in ALLOWED_TYPES:
         await ws.send_json({"type": "error", "message": "Unknown message type"})
         return
@@ -205,6 +210,98 @@ async def handle_signal(
             for p in peers
         ]
         await ws.send_json({"type": "peers_list", "peers": safe_peers})
+        return
+
+    # ---- Phase 1: NAT Traversal Messages ----
+
+    if msg_type == "stun_result":
+        # Peer reports its STUN-discovered public address
+        public_addr = msg.get("public_addr", "")
+        nat_type = msg.get("nat_type", "unknown")
+        await signaling_hub.update_device_nat(device_id, nat_type, public_addr)
+        logger.info(
+            "STUN result from device %s: addr=%s, nat=%s",
+            device_id, public_addr, nat_type,
+        )
+        await ws.send_json({"type": "stun_ack"})
+        return
+
+    if msg_type == "candidates":
+        # Peer shares its candidates (local + STUN addresses)
+        candidates = msg.get("candidates", [])
+        if not isinstance(candidates, list) or len(candidates) > 20:
+            await ws.send_json({"type": "error", "message": "Invalid candidates"})
+            return
+        await signaling_hub.store_candidates(device_id, candidates)
+        await ws.send_json({"type": "candidates_ack", "count": len(candidates)})
+        logger.info("Candidates stored for device %s: %d entries", device_id, len(candidates))
+        return
+
+    if msg_type == "candidates_request":
+        # Request a specific peer's candidates
+        target_str = msg.get("peer_id", "")
+        if not target_str:
+            await ws.send_json({"type": "error", "message": "Missing peer_id"})
+            return
+        try:
+            target_id = uuid.UUID(target_str)
+        except ValueError:
+            await ws.send_json({"type": "error", "message": "Invalid peer ID"})
+            return
+
+        peer_candidates = await signaling_hub.get_peer_candidates(device_id, target_id)
+        if peer_candidates is None:
+            await ws.send_json({
+                "type": "candidates_response",
+                "peer_id": target_str,
+                "candidates": [],
+                "error": "Peer not authorized or no candidates",
+            })
+        else:
+            await ws.send_json({
+                "type": "candidates_response",
+                "peer_id": target_str,
+                "candidates": peer_candidates,
+            })
+
+    if msg_type == "punch_request":
+        # Initiate hole punching with a peer
+        target_str = msg.get("peer_id", "")
+        if not target_str:
+            await ws.send_json({"type": "error", "message": "Missing peer_id"})
+            return
+        try:
+            target_id = uuid.UUID(target_str)
+        except ValueError:
+            await ws.send_json({"type": "error", "message": "Invalid peer ID"})
+            return
+
+        # Forward punch request to target peer
+        delivered = await signaling_hub.relay_signal(
+            device_id, target_id, "punch_offer",
+            {"from_device": str(device_id), "candidates": msg.get("our_candidates", [])},
+        )
+        if not delivered:
+            await ws.send_json({"type": "error", "message": "Peer not available"})
+        else:
+            await ws.send_json({"type": "punch_ack", "peer_id": target_str})
+
+    if msg_type == "punch_result":
+        # Report hole punch result (success/failure)
+        target_str = msg.get("peer_id", "")
+        success = msg.get("success", False)
+        path_type = msg.get("path_type", "relay")
+        logger.info(
+            "Punch result: device=%s -> peer=%s success=%s path=%s",
+            device_id, target_str, success, path_type,
+        )
+        await ws.send_json({"type": "punch_result_ack"})
+
+    if msg_type == "path_quality":
+        # Report path quality metrics for active connections
+        metrics = msg.get("metrics", {})
+        logger.debug("Path quality from device %s: %s", device_id, metrics)
+        await ws.send_json({"type": "path_quality_ack"})
         return
 
     # For offer/answer/ice_candidate: validate target

@@ -180,6 +180,25 @@ services:
         max-size: "10m"
         max-file: "2"
 
+  # ---- STUN Server ----
+  stun:
+    image: ${DOCKER_REGISTRY:-yourorg}/p2p-mesh-stun:${IMAGE_TAG:-latest}
+    ports:
+      - "3478:3478/udp"
+    restart: unless-stopped
+    networks:
+      - mesh-net
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 128M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "2"
+
   # ---- Relay Node ----
   relay:
     image: ${DOCKER_REGISTRY:-yourorg}/p2p-mesh-relay:${IMAGE_TAG:-latest}

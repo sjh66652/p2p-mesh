@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.models.device import NATType
+from app.services.nat_utils import can_establish_p2p, estimate_p2p_success_rate
 
 
 @dataclass
@@ -24,7 +25,8 @@ class PathResult:
 
 
 # P2P feasibility matrix: whether two NAT types can establish a direct connection
-# True = direct P2P possible, False = requires relay
+# True = direct P2P possible, False = requires relay.
+# Imported from nat_utils for centralized NAT logic.
 NAT_COMPATIBILITY = {
     (NATType.OPEN, NATType.OPEN): True,
     (NATType.OPEN, NATType.FULL_CONE): True,
@@ -51,17 +53,9 @@ NAT_COMPATIBILITY = {
 
 
 def can_p2p(nat_a: str, nat_b: str) -> bool:
-    """
-    Determine if two devices can establish a direct P2P connection
-    based on their NAT types.
-
-    Uses a pre-computed compatibility matrix derived from RFC 4787 / RFC 5389
-    NAT behavior discovery results.
-    """
-    if nat_a == NATType.UNKNOWN or nat_b == NATType.UNKNOWN:
-        # Conservative: assume P2P is possible and let the client try
-        return True
-    return NAT_COMPATIBILITY.get((nat_a, nat_b), False)
+    """Check if two NAT types can establish direct P2P.
+    Uses the centralized nat_utils module for classification."""
+    return can_establish_p2p(nat_a, nat_b)
 
 
 async def choose_path(

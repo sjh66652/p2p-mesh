@@ -14,6 +14,9 @@ use tokio::net::UdpSocket;
 use tokio::sync::Mutex;
 
 use crate::crypto::{self, SessionKey};
+use crate::puncher;
+use crate::stun;
+use crate::multipath::{MultiPathManager, PathType};
 
 /// Represents an active P2P tunnel to a peer.
 pub struct P2PTunnel {
@@ -150,14 +153,129 @@ pub async fn hole_punch(
     Ok(())
 }
 
-/// Probe NAT type by sending STUN-like requests.
-/// Returns a classification string matching the control plane's NAT types.
-pub async fn probe_nat_type(_socket: &UdpSocket) -> &'static str {
-    // In a full implementation, this would:
-    // 1. Send STUN binding requests to multiple STUN servers
-    // 2. Compare mapped addresses across servers
-    // 3. Classify NAT type (open, full_cone, restricted_cone, port_restricted, symmetric)
-    //
-    // For now, return unknown — the control plane will try P2P first.
-    "unknown"
+/// Probe NAT type by querying multiple STUN servers.
+/// Returns the NAT classification string.
+pub async fn probe_nat_type(
+    socket: &UdpSocket,
+    stun_servers: &[String],
+) -> stun::NatClassification {
+    if stun_servers.is_empty() {
+        return stun::NatClassification::Unknown;
+    }
+
+    let results = stun::probe_multi_stun(stun_servers).await;
+
+    if results.is_empty() {
+        return stun::NatClassification::Unknown;
+    }
+
+    log::info!(
+        "NAT probe complete: {} servers, results={:?}",
+        results.len(),
+        results.iter().map(|(s, r)| {
+            format!("{}->{}", s, r.as_ref().map(|a| a.to_string()).unwrap_or_else(|e| e.clone()))
+        }).collect::<Vec<_>>()
+    );
+
+    stun::classify_nat(&results)
+}
+
+/// Establish a connection to a peer using full NAT traversal.
+///
+/// Flow:
+/// 1. Query STUN for public address
+/// 2. Exchange candidates via signaling
+/// 3. Execute UDP hole punching
+/// 4. If punch fails, use relay path
+/// 5. Set up QUIC or ChaCha20-Poly1305 encryption
+///
+/// Returns the established path type and session key.
+pub async fn establish_p2p_connection(
+    socket: Arc<tokio::net::UdpSocket>,
+    stun_server: &str,
+    peer_id: &str,
+    our_device_id: &str,
+    peer_candidates: &[puncher::Candidate],
+    relay_addr: Option<std::net::SocketAddr>,
+    multi_path: &Arc<MultiPathManager>,
+) -> Result<(PathType, SessionKey), String> {
+    // Step 1: Get our public address
+    let our_public = stun::get_public_addr(stun_server).await?;
+    log::info!("Our public address: {}", our_public);
+
+    // Build our candidates
+    let mut our_candidates = Vec::new();
+    if let Ok(local) = socket.local_addr() {
+        our_candidates.push(puncher::Candidate {
+            addr: local,
+            candidate_type: "host".to_string(),
+            priority: 100,
+        });
+    }
+    our_candidates.push(puncher::Candidate {
+        addr: our_public,
+        candidate_type: "srflx".to_string(),
+        priority: 90,
+    });
+
+    // Register my local path
+    multi_path.register_path(
+        peer_id,
+        PathType::Direct,
+        our_public,
+    ).await;
+
+    // Register relay path if available
+    if let Some(relay) = relay_addr {
+        multi_path.register_path(
+            peer_id,
+            PathType::Relay,
+            relay,
+        ).await;
+    }
+
+    // Step 2: Execute hole punching
+    log::info!(
+        "Starting hole punch to {} (local candidates: {}, peer candidates: {})",
+        peer_id, our_candidates.len(), peer_candidates.len()
+    );
+
+    let hmac_key = b"mesh-punch-hmac"; // In production: use a proper shared secret
+
+    let punch_result = puncher::execute_punch(
+        socket.clone(),
+        hmac_key,
+        peer_id,
+        our_device_id,
+        &our_candidates,
+        peer_candidates,
+        std::time::Duration::from_secs(10),
+        relay_addr,
+    ).await;
+
+    match punch_result {
+        Ok(direct_addr) => {
+            log::info!("Direct P2P connection established to {} at {}", peer_id, direct_addr);
+            multi_path.mark_active(peer_id, &PathType::Direct).await;
+
+            let session_key = SessionKey::generate();
+            Ok((PathType::Direct, session_key))
+        }
+        Err(e) => {
+            log::warn!(
+                "Hole punch to {} failed: {}. Falling back to relay.",
+                peer_id, e
+            );
+
+            // Fall back to relay
+            if let Some(relay) = relay_addr {
+                multi_path.mark_active(peer_id, &PathType::Relay).await;
+                let session_key = SessionKey::generate();
+                log::info!("Using relay path for {} via {}", peer_id, relay);
+                Ok((PathType::Relay, session_key))
+            } else {
+                Err(format!("No path to {} available (punch failed, no relay)", peer_id))
+            }
+        }
+    }
 }

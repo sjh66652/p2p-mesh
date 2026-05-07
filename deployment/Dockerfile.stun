@@ -1,8 +1,8 @@
-# P2P Mesh Network - Data Plane Relay Dockerfile
+# P2P Mesh Network - STUN Server Dockerfile
 # Multi-stage build for minimal image size
+# Builds the mesh-stun binary for NAT traversal
 
 # ---- Build Stage ----
-# Build stage uses latest stable Rust (pinned minor is fragile with fast-moving deps)
 FROM rust:latest AS builder
 
 WORKDIR /build
@@ -31,13 +31,13 @@ RUN mkdir -p src/bin src/crypto src/tunnel src/relay src/stun src/puncher src/qu
     echo '' > src/metrics/mod.rs && \
     echo '' > src/relay/mod.rs
 
-# Cache dependencies (ignore errors for first build)
-RUN cargo build --release --bin mesh-relay 2>/dev/null || true
+# Cache dependencies
+RUN cargo build --release --bin mesh-stun 2>/dev/null || true
 
 # Copy actual source and build
 COPY src/ ./src/
 RUN touch src/lib.rs
-RUN cargo build --release --bin mesh-relay
+RUN cargo build --release --bin mesh-stun
 
 # ---- Runtime Stage ----
 FROM debian:bookworm-slim
@@ -50,12 +50,9 @@ RUN useradd --create-home --shell /bin/bash mesh
 USER mesh
 WORKDIR /app
 
-COPY --from=builder /build/target/release/mesh-relay /app/mesh-relay
+COPY --from=builder /build/target/release/mesh-stun /app/mesh-stun
 
-EXPOSE 51821/udp
+EXPOSE 3478/udp
 
-ENTRYPOINT ["/app/mesh-relay"]
-# All arguments are read from environment variables:
-#   RELAY_ID, RELAY_AUTH_TOKEN, API_URL, REGION, RELAY_PORT,
-#   HEARTBEAT_INTERVAL, RELAY_MAX_CONNECTIONS, RELAY_BANDWIDTH_MBPS
-CMD []
+ENTRYPOINT ["/app/mesh-stun"]
+CMD ["--port", "3478"]

@@ -141,6 +141,19 @@ services:
       - mesh-net
 
   # ============================================================
+  # STUN Server — NAT traversal address discovery (Rust)
+  # ============================================================
+  stun:
+    build:
+      context: ../data-plane
+      dockerfile: ../deployment/Dockerfile.stun
+    ports:
+      - "3478:3478/udp"
+    restart: unless-stopped
+    networks:
+      - mesh-net
+
+  # ============================================================
   # Relay Node — High-performance UDP packet forwarder (Rust)
   # ============================================================
   relay:

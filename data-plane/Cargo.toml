@@ -2,7 +2,7 @@
 name = "p2p-mesh-dataplane"
 version = "1.0.0"
 edition = "2021"
-description = "High-performance P2P mesh networking data plane"
+description = "High-performance P2P mesh networking data plane with NAT traversal"
 
 [dependencies]
 # Async runtime
@@ -23,8 +23,8 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 bincode = "1"
 
-# HTTP client for control plane communication
-reqwest = { version = "0.12", features = ["json"] }
+# HTTP client (rustls-tls avoids OpenSSL dep)
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "http2"] }
 
 # Logging
 log = "0.4"
@@ -47,3 +47,25 @@ zeroize = { version = "1", features = ["derive"] }
 
 # Time utilities
 chrono = "0.4"
+
+# Phase 2: QUIC Transport
+quinn = "0.11"
+rustls = { version = "0.23", features = ["ring"] }
+rcgen = { version = "0.13" }
+
+# Additional utilities
+thiserror = "2.0"
+tokio-util = { version = "0.7", features = ["codec"] }
+bytes = "1"
+
+[[bin]]
+name = "mesh-tunnel"
+path = "src/bin/mesh-tunnel.rs"
+
+[[bin]]
+name = "mesh-relay"
+path = "src/bin/mesh-relay.rs"
+
+[[bin]]
+name = "mesh-stun"
+path = "src/bin/mesh-stun.rs"
