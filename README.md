@@ -255,23 +255,25 @@ curl -X POST http://localhost/api/v1/devices \
 
 ### NAT Traversal (Phase 1)
 
-The data plane implements a complete NAT traversal stack:
+The data plane implements a complete, security-hardened NAT traversal stack:
 
 1. **STUN Discovery** — Client sends `ping` to STUN server (UDP 3478), receives its public `IP:PORT` mapping
 2. **NAT Classification** — Multi-server STUN probes classify NAT type (Full Cone / Symmetric / etc.)
 3. **Candidate Exchange** — ICE-style candidates exchanged via signaling WebSocket + REST API
-4. **UDP Hole Punching** — Burst of HELLO packets to peer candidates, HELLO_ACK confirms connectivity
+4. **UDP Hole Punching** — Burst of HMAC-SHA256-authenticated HELLO packets to peer candidates (max 10), HELLO_ACK confirms connectivity. Enforced 500-packet budget and unsafe-address rejection prevent abuse.
 5. **Relay Fallback** — When direct P2P fails (e.g., Symmetric NAT on both sides), traffic routes through relay
 
 ### Data Plane Transport (Phase 2)
 
 | Feature | Implementation | Details |
 |---------|---------------|---------|
-| **Transport** | QUIC (RFC 9000) via quinn 0.11 | TLS 1.3, 0-RTT, multiplexed streams, connection migration |
+| **Transport** | QUIC (RFC 9000) via quinn 0.11 | TLS 1.3, 0-RTT, multiplexed streams, connection migration, SHA-256 cert pinning |
 | **Encryption** | ChaCha20-Poly1305 AEAD | Data plane traffic never decrypted by control plane |
+| **Key Exchange** | X25519 ECDH | HKDF domain-separated session key derivation |
 | **Multi-Path** | Direct / Relay / Local | Auto-selects best path based on RTT, loss, bandwidth |
 | **Quality Metrics** | EWMA-smoothed | RTT (microsecond precision), loss rate %, bandwidth bps |
-| **Relay Auth** | HMAC-SHA256 | Source device ID authentication, per-device rate limiting |
+| **Relay Auth** | HMAC-SHA256 | Source device ID authentication, per-device + per-IP rate limiting |
+| **Punch Auth** | HMAC-SHA256 | HELLO/HELLO_ACK packet authentication, 10-candidate limit, 500-packet budget |
 
 ### Path Selection Strategy
 
@@ -284,17 +286,30 @@ Direct P2P (preferred)  →  Relay (fallback)  →  None (unreachable)
 
 ## Security
 
-Defense-in-depth across every layer. 16 vulnerabilities patched as of May 2026.
+Defense-in-depth across every layer. Comprehensive audit (May 2026): 71 findings identified, 55 patched.
 
 - **Transport**: Nginx enforces TLS 1.2+, HSTS headers
-- **Authentication**: JWT (HS256) with jti-based precise revocation, bcrypt (rounds=12)
+- **Authentication**: JWT (HS256) with jti-based precise revocation, device-session isolation, bcrypt (rounds=12)
+- **Password policy**: 10+ characters, 3 of 4 character classes, bcrypt with work factor 12
+- **Brute-force protection**: Redis-based login lockout after N failed attempts
+- **Registration hardening**: IP-based rate limiting (5/hour), generic error messages to prevent user enumeration
+- **Audit logging**: All auth events logged; email addresses SHA-256 hashed with JWT secret to prevent PII leakage
 - **Inter-service**: Shared `INTERNAL_API_KEY` header for service-to-service calls
 - **Data plane**: ChaCha20-Poly1305 AEAD, keys never touch the server
+- **ECDH key exchange**: X25519 elliptic-curve Diffie-Hellman with HKDF domain separation
+- **Certificate pinning**: QUIC clients verify server certificates against SHA-256 fingerprints (prevents MITM)
+- **Punch authentication**: HMAC-SHA256 on all HELLO/HELLO_ACK packets, prevents unauthorized NAT traversal
+- **Candidate limits**: Max 10 peer candidates per punch session, 500 total punch packets (DoS prevention)
+- **Address validation**: Rejects multicast, broadcast, unspecified, and loopback targets
 - **Zero-trust relay**: Relay nodes forward encrypted packets without decryption
-- **Rate limiting**: Nginx layer + Redis sliding window (multi-replica safe)
+- **Relay HMAC**: Enforced via `RELAY_HMAC_KEY` env var (no hardcoded fallbacks)
+- **Rate limiting**: Nginx layer + Redis sliding window (multi-replica safe), per-device + per-IP relay limits
 - **Input validation**: Pydantic schemas, SQLAlchemy ORM (no raw SQL), 1MB body limit
-- **Container security**: Non-root user (`USER mesh`), minimal base images
-- **Secrets**: All secrets via environment variables, never hardcoded
+- **Container security**: Non-root user (`USER mesh`), minimal base images, pinned image digests
+- **Dependency scanning**: `bandit`, `pip-audit`, `cargo audit` in CI (no `|| true` bypass)
+- **Secrets**: All secrets via environment variables, never hardcoded; all defaults are `CHANGE_ME_REQUIRED` placeholders
+- **DH params**: 4096-bit for Nginx (upgraded from 2048-bit)
+- **Trusted hosts**: All microservices enforce `TrustedHostMiddleware` (no wildcard `*`)
 
 See [SECURITY.md](./SECURITY.md) for the full audit history and incident response procedures.
 
@@ -359,7 +374,7 @@ export MESH_TOKEN="<jwt-token>"
 # 1. STUN public address discovery
 # 2. Candidate registration via REST API
 # 3. WebSocket signaling connection
-# 4. UDP hole punching (HELLO/ACK, 10s timeout → relay fallback)
+# 4. UDP hole punching (HMAC-authenticated HELLO/ACK, 10s timeout → relay fallback)
 # 5. QUIC connection establishment (TLS 1.3, ChaCha20-Poly1305 AEAD)
 # 6. Multi-path management (Direct > Relay auto-selection)
 # 7. Periodic traffic/quality metrics reporting
@@ -375,7 +390,7 @@ export REGION="us-east"
   --max-connections 1000 \
   --bandwidth-mbps 1000
 
-# Security: HMAC-SHA256 source authentication, per-device rate limiting
+# Security: HMAC-SHA256 source authentication, per-device + per-IP rate limiting
 
 ## Deployment Options
 
@@ -412,17 +427,19 @@ After running `docker compose up -d`, you **must** change the following before a
 
 | Variable | Current Dev Value | How to Generate | Used By |
 |----------|-------------------|-----------------|---------|
-| `JWT_SECRET` | `dev-jwt-secret-change-me-in-production...` | `openssl rand -hex 64` | All 5 microservices |
-| `POSTGRES_PASSWORD` | `mesh_dev_password_change_me` | `openssl rand -base64 32` | All services + PostgreSQL |
-| `REDIS_PASSWORD` | `redis_dev_password_change_me` | `openssl rand -hex 16` | All services + Redis |
-| `RELAY_AUTH_TOKEN` | `dev-relay-auth-token-change-me...` | `openssl rand -hex 32` | relay-service + Rust relay |
-| `INTERNAL_API_KEY` | `dev-internal-api-key-change-me...` | `openssl rand -hex 32` | All 5 microservices (inter-service auth) |
+| `JWT_SECRET` | `CHANGE_ME_REQUIRED` | `openssl rand -hex 64` | All 5 microservices |
+| `POSTGRES_PASSWORD` | `CHANGE_ME_REQUIRED` | `openssl rand -base64 32` | All services + PostgreSQL |
+| `REDIS_PASSWORD` | `CHANGE_ME_REQUIRED` | `openssl rand -hex 16` | All services + Redis |
+| `RELAY_AUTH_TOKEN` | `CHANGE_ME_REQUIRED` | `openssl rand -hex 32` | relay-service + Rust relay |
+| `RELAY_HMAC_KEY` | `CHANGE_ME_REQUIRED` | `openssl rand -hex 32` | Rust relay (packet authentication) |
+| `PUNCH_HMAC_KEY` | `CHANGE_ME_REQUIRED` | `openssl rand -hex 32` | Rust tunnel (punch packet auth) |
+| `INTERNAL_API_KEY` | `CHANGE_ME_REQUIRED` | `openssl rand -hex 32` | All 5 microservices (inter-service auth) |
 
 ### Recommended — Should Change
 
 | Variable | Current Dev Value | Notes |
 |----------|-------------------|-------|
-| `GRAFANA_PASSWORD` | `grafana_dev_password_change_me` | Change to a strong unique password |
+| `GRAFANA_PASSWORD` | `CHANGE_ME_REQUIRED` | Change to a strong unique password |
 | `GRAFANA_USER` | `admin` | Optional, but changing adds obscurity |
 | `LOG_LEVEL` | `INFO` | Set to `WARNING` in production to reduce log volume |
 | `DEBUG` | `false` | Must remain `false` in production |
