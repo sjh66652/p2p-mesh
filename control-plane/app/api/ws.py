@@ -13,12 +13,11 @@ import time
 import uuid
 import logging
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query, status
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from jose import jwt, JWTError
 
 from app.config import settings
-from app.database import AsyncSession, get_db, get_redis
-from app.dependencies import get_current_device
+from app.database import get_db, get_redis
 from app.services.signaling_service import signaling_hub
 
 logger = logging.getLogger("p2p-mesh.ws")

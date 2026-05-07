@@ -5,7 +5,7 @@ Relay node model - intermediate forwarding servers in the mesh network.
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import String, DateTime, Float, Boolean
+from sqlalchemy import String, DateTime, Float
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.dialects.postgresql import UUID
 

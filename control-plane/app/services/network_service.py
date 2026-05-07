@@ -9,9 +9,8 @@ from typing import Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import settings
 from app.models.device import NATType
-from app.services.nat_utils import can_establish_p2p, estimate_p2p_success_rate
+from app.services.nat_utils import can_establish_p2p
 
 
 @dataclass

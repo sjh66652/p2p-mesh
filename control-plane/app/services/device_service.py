@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 
-from app.models.device import Device, NATType
+from app.models.device import Device
 from app.schemas.device import DeviceRegister, DeviceHeartbeat
 
 
@@ -112,6 +112,6 @@ async def delete_device(
 async def count_online_devices(db: AsyncSession) -> int:
     """Count how many devices are currently online."""
     result = await db.execute(
-        select(func.count()).select_from(Device).where(Device.online == True)
+        select(func.count()).select_from(Device).where(Device.online.is_(True))
     )
     return result.scalar_one()

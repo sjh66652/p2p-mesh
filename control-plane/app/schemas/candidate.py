@@ -8,7 +8,6 @@ and local interface enumeration (host).
 
 from pydantic import BaseModel, Field
 from typing import List, Optional
-from uuid import UUID
 
 
 class CandidateEntry(BaseModel):

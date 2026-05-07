@@ -6,8 +6,8 @@ import uuid
 from datetime import datetime, timezone
 
 from sqlalchemy import (
-    String, DateTime, Float, Boolean, BigInteger,
-    ForeignKey, Text, Integer,
+    String, DateTime, Boolean, BigInteger,
+    ForeignKey, Integer,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.dialects.postgresql import UUID

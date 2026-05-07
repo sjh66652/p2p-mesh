@@ -7,8 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db, get_redis
 from app.dependencies import get_current_user, security_scheme
 from app.schemas.user import (
-    UserRegister, UserLogin, TokenResponse,
-    UserResponse, UserUpdate, PasswordChange,
+    UserRegister, UserLogin, UserResponse, UserUpdate, PasswordChange,
 )
 from app.services import auth_service
 
@@ -21,7 +20,7 @@ async def register(data: UserRegister, db: AsyncSession = Depends(get_db)):
     try:
         user = await auth_service.register_user(db, data)
         return user
-    except ValueError as e:
+    except ValueError:
         # Use generic error to prevent user enumeration
         # (avoids leaking whether email exists vs. password too weak)
         raise HTTPException(
@@ -40,7 +39,7 @@ async def login(
     try:
         token_data = await auth_service.login_user(db, data, redis_client)
         return token_data
-    except ValueError as e:
+    except ValueError:
         # Generic error — don't reveal whether email exists
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -57,7 +56,7 @@ async def refresh_token(
     try:
         token_data = await auth_service.refresh_access_token(refresh_token, redis_client)
         return token_data
-    except ValueError as e:
+    except ValueError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or expired refresh token",

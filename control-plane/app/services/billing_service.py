@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_
 
 from app.config import settings
-from app.models.user import User, UserPlan
+from app.models.user import UserPlan
 from app.models.traffic import TrafficLog, Subscription, Invoice
 
 

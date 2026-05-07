@@ -18,8 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.dependencies import get_current_user
 from app.schemas.candidate import (
-    CandidateRegister, CandidateResponse, CandidateListResponse,
-    CandidateEntry, NATProbeRequest, NATProbeResponse,
+    CandidateRegister, CandidateResponse, CandidateEntry, NATProbeRequest, NATProbeResponse,
 )
 from app.models.device import Device, NATType
 

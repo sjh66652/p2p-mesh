@@ -11,7 +11,7 @@ This module complements the Rust data plane's STUN implementation.
 """
 
 import logging
-from typing import List, Tuple, Dict, Optional
+from typing import List, Tuple, Dict
 
 logger = logging.getLogger(__name__)
 

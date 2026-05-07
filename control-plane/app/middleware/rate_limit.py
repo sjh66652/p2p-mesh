@@ -9,7 +9,6 @@ import logging
 from fastapi import Request, HTTPException, status
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from app.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +39,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         # Redis-backed sliding window (defensive: don't crash if redis not on state)
         redis = getattr(request.app.state, 'redis_client', None)
         if redis:
-            allowed = await self._check_redis_rate_limit(redis, client_ip)
+            allowed = await self._check_redis_rate_limit(redis, client_ip, request)
         else:
             # Fallback: in-memory (single-instance only, no leak)
             allowed = self._check_memory_rate_limit(request, client_ip)
@@ -56,7 +55,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         response = await call_next(request)
         return response
 
-    async def _check_redis_rate_limit(self, redis, client_ip: str) -> bool:
+    async def _check_redis_rate_limit(self, redis, client_ip: str, request: Request) -> bool:
         """Redis sliding window rate limit. No memory leak."""
         now_ms = int(time.time() * 1000)
         window_ms = 60_000  # 1 minute

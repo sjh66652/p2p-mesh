@@ -3,7 +3,6 @@ FastAPI dependencies: JWT auth, device ownership verification, role checks.
 """
 
 import uuid
-from datetime import datetime, timezone
 
 from fastapi import Depends, HTTPException, status, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials

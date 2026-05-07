@@ -9,11 +9,12 @@ Security:
 """
 
 import asyncio
-import json
 import logging
 import uuid
 from dataclasses import dataclass, field
 from typing import Dict, Set
+
+from fastapi import WebSocket
 
 logger = logging.getLogger(__name__)
 
