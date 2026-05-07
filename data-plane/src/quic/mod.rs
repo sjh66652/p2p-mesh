@@ -6,12 +6,14 @@
 //! This module wraps quinn to provide a high-level API for creating QUIC endpoints,
 //! connecting to peers, and sending/receiving data over QUIC streams.
 
+use std::collections::HashSet;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
 use quinn::{Connection, Endpoint, RecvStream, SendStream, ServerConfig, TransportConfig};
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
+use sha2::{Digest, Sha256};
 
 pub struct QuicTransport {
     endpoint: Endpoint,
@@ -26,15 +28,53 @@ impl QuicTransport {
         Ok(Self { endpoint, server_config })
     }
 
+    /// Get the SHA-256 fingerprint of our server certificate.
+    /// This fingerprint should be exchanged with peers via the signaling
+    /// channel before attempting a QUIC connection.
+    pub fn certificate_fingerprint(&self) -> Result<String, Box<dyn std::error::Error>> {
+        // Re-generate to get the cert bytes (in production, cache this)
+        let (cert_der, _) = generate_self_signed_cert()?;
+        let fingerprint = Sha256::digest(cert_der.as_ref());
+        Ok(hex::encode(&fingerprint))
+    }
+
+    /// Connect to a peer with certificate pinning.
+    /// `peer_fingerprint` is the SHA-256 hex fingerprint of the peer's
+    /// self-signed certificate, exchanged via the signaling channel.
+    /// If `peer_fingerprint` is None, a warning is logged and the connection
+    /// is allowed without verification (for backwards compatibility).
     pub async fn connect(
         &self,
         peer_addr: SocketAddr,
         server_name: &str,
+        peer_fingerprint: Option<&str>,
     ) -> Result<Connection, Box<dyn std::error::Error>> {
-        let client_crypto = rustls::ClientConfig::builder()
-            .dangerous()
-            .with_custom_certificate_verifier(SkipServerVerification::new())
-            .with_no_client_auth();
+        let expected_fingerprints: HashSet<String> = peer_fingerprint
+            .map(|fp| {
+                let mut set = HashSet::new();
+                set.insert(fp.to_string());
+                set
+            })
+            .unwrap_or_default();
+
+        let client_crypto = if expected_fingerprints.is_empty() {
+            log::warn!(
+                "QUIC connecting to {} without certificate pinning — connection is vulnerable to MitM. \
+                 Exchange certificate fingerprints via the signaling channel and pass them to connect().",
+                peer_addr
+            );
+            // Legacy behavior: skip verification with loud warning
+            rustls::ClientConfig::builder()
+                .dangerous()
+                .with_custom_certificate_verifier(SkipServerVerification::new())
+                .with_no_client_auth()
+        } else {
+            rustls::ClientConfig::builder()
+                .dangerous()
+                .with_custom_certificate_verifier(CertificatePinner::new(expected_fingerprints))
+                .with_no_client_auth()
+        };
+
         let quic_client_config = quinn::crypto::rustls::QuicClientConfig::try_from(
             Arc::new(client_crypto),
         )?;
@@ -55,16 +95,23 @@ impl QuicTransport {
     pub async fn send(conn: &Connection, data: &[u8]) -> Result<usize, Box<dyn std::error::Error>> {
         let (mut send, _recv) = conn.open_bi().await?;
         send.write_all(data).await?;
-        send.finish().unwrap();
+        send.finish().map_err(|e| format!("Stream finish error: {}", e))?;
         Ok(data.len())
     }
 
     pub async fn recv(recv: &mut RecvStream) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+        const MAX_MESSAGE_SIZE: usize = 10 * 1024 * 1024; // 10 MB limit
         let mut data = Vec::new();
         loop {
             let mut buf = [0u8; 65536];
             match recv.read(&mut buf).await? {
                 Some(n) => {
+                    if data.len() + n > MAX_MESSAGE_SIZE {
+                        return Err(format!(
+                            "Message exceeds maximum size of {} bytes",
+                            MAX_MESSAGE_SIZE
+                        ).into());
+                    }
                     data.extend_from_slice(&buf[..n]);
                     if n == 0 { break; }
                 }
@@ -100,64 +147,4 @@ fn configure_server(
 ) -> Result<ServerConfig, Box<dyn std::error::Error>> {
     let mut server_crypto = rustls::ServerConfig::builder()
         .with_no_client_auth()
-        .with_single_cert(vec![cert_der], key_der.clone_key())?;
-    server_crypto.alpn_protocols = vec![b"mesh/1".to_vec()];
-    let quic_config = quinn::crypto::rustls::QuicServerConfig::try_from(Arc::new(server_crypto))?;
-    let mut server_config = quinn::ServerConfig::with_crypto(Arc::new(quic_config));
-    let mut transport = TransportConfig::default();
-    transport.max_idle_timeout(Some(Duration::from_secs(30).try_into().unwrap()));
-    transport.keep_alive_interval(Some(Duration::from_secs(10)));
-    transport.max_concurrent_bidi_streams(100u32.into());
-    transport.send_window(8 * 1024 * 1024);
-    server_config.transport_config(Arc::new(transport));
-    Ok(server_config)
-}
-
-#[derive(Debug)]
-struct SkipServerVerification;
-
-impl SkipServerVerification {
-    fn new() -> Arc<Self> {
-        Arc::new(Self)
-    }
-}
-
-impl rustls::client::danger::ServerCertVerifier for SkipServerVerification {
-    fn verify_server_cert(
-        &self,
-        _end_entity: &CertificateDer<'_>,
-        _intermediates: &[CertificateDer<'_>],
-        _server_name: &rustls::pki_types::ServerName<'_>,
-        _ocsp_response: &[u8],
-        _now: rustls::pki_types::UnixTime,
-    ) -> Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
-        Ok(rustls::client::danger::ServerCertVerified::assertion())
-    }
-
-    fn verify_tls12_signature(
-        &self,
-        _message: &[u8],
-        _cert: &CertificateDer<'_>,
-        _dss: &rustls::DigitallySignedStruct,
-    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
-        Ok(rustls::client::danger::HandshakeSignatureValid::assertion())
-    }
-
-    fn verify_tls13_signature(
-        &self,
-        _message: &[u8],
-        _cert: &CertificateDer<'_>,
-        _dss: &rustls::DigitallySignedStruct,
-    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
-        Ok(rustls::client::danger::HandshakeSignatureValid::assertion())
-    }
-
-    fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
-        vec![
-            rustls::SignatureScheme::RSA_PKCS1_SHA256,
-            rustls::SignatureScheme::ECDSA_NISTP256_SHA256,
-            rustls::SignatureScheme::ECDSA_NISTP384_SHA384,
-            rustls::SignatureScheme::ED25519,
-        ]
-    }
-}
+        .with_single_cert(vec!

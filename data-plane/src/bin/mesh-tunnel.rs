@@ -21,6 +21,16 @@ use clap::Parser;
 use tokio::net::UdpSocket;
 use tokio::sync::Mutex;
 
+/// Emit a warning if a plaintext HTTP URL is used for a non-localhost target.
+fn warn_plaintext_http(url: &str, label: &str) {
+    if url.starts_with("http://") && !url.contains("localhost") && !url.contains("127.0.0.1") {
+        log::warn!(
+            "{} uses plain HTTP ({}) — traffic is NOT encrypted. Use HTTPS in production.",
+            label, url
+        );
+    }
+}
+
 // Project modules
 use p2p_mesh_dataplane::crypto::{self, SessionKey};
 use p2p_mesh_dataplane::metrics::PathMetrics;
@@ -33,10 +43,10 @@ use p2p_mesh_dataplane::tunnel::TunnelManager;
 #[derive(Parser, Debug)]
 #[command(name = "mesh-tunnel")]
 struct Args {
-    #[arg(long, default_value = "http://localhost:8000")]
+    #[arg(long, default_value = "https://localhost:8443")]
     api_url: String,
 
-    #[arg(long, default_value = "ws://localhost:8000/api/v1/ws")]
+    #[arg(long, default_value = "wss://localhost:8443/api/v1/ws")]
     ws_url: String,
 
     /// JWT token — read from MESH_TOKEN env var (never CLI args)
@@ -68,6 +78,9 @@ struct PeerConnection {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::init();
     let args = Args::parse();
+
+    warn_plaintext_http(&args.api_url, "API URL");
+    warn_plaintext_http(&args.ws_url, "WebSocket URL");
 
     log::info!(
         "Starting mesh-tunnel v2.0.0 (device: {})",
@@ -285,19 +298,4 @@ async fn report_traffic(
     });
 
     match client
-        .post(format!("{}/api/v1/traffic/report", api_url))
-        .header("Authorization", format!("Bearer {}", token))
-        .json(&payload)
-        .send()
-        .await
-    {
-        Ok(resp) => {
-            if resp.status().is_success() {
-                log::debug!("Traffic reported: {} bytes", total_bytes);
-            } else {
-                log::warn!("Traffic report failed: {}", resp.status());
-            }
-        }
-        Err(e) => log::error!("Traffic report error: {}", e),
-    }
-}
+        .post(for

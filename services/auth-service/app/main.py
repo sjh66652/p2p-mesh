@@ -205,7 +205,7 @@ app.add_middleware(
 
 app.add_middleware(
     TrustedHostMiddleware,
-    allowed_hosts=["*"],
+    allowed_hosts=settings.ALLOWED_HOSTS if hasattr(settings, 'ALLOWED_HOSTS') else ["localhost", "127.0.0.1"],
 )
 
 app.add_middleware(RateLimitMiddleware, calls_per_minute=settings.RATE_LIMIT_PER_MINUTE)
@@ -229,5 +229,4 @@ async def metrics(request: Request):
     client_ip = request.client.host if request.client else ""
     if not (client_ip.startswith("172.") or client_ip.startswith("10.") or client_ip == "127.0.0.1"):
         return Response(status_code=403, content="Forbidden")
-    from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
-    return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
+    from prometheus_client import generate_latest, CONTENT_TYPE

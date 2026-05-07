@@ -31,6 +31,7 @@ class TaskWorker:
         self.redis: redis.Redis = None
         self._running = False
         self._tasks: list[asyncio.Task] = []
+        self._db_engine = None
 
     async def start(self):
         """Connect to Redis and start processing."""
@@ -55,6 +56,7 @@ class TaskWorker:
         await asyncio.gather(*self._tasks, return_exceptions=True)
         if self.redis:
             await self.redis.close()
+        await self._dispose_db_engine()
         log.info("Worker stopped")
 
     async def _process_usage_queue(self):
@@ -81,6 +83,21 @@ class TaskWorker:
                 log.error("Usage queue processor error: %s", e)
                 await asyncio.sleep(5)
 
+    async def _get_db_engine(self):
+        """Get or create the shared database engine."""
+        if self._db_engine is None and settings.DATABASE_URL:
+            from sqlalchemy.ext.asyncio import create_async_engine
+            self._db_engine = create_async_engine(
+                settings.DATABASE_URL, pool_size=5
+            )
+        return self._db_engine
+
+    async def _dispose_db_engine(self):
+        """Dispose the shared database engine on shutdown."""
+        if self._db_engine is not None:
+            await self._db_engine.dispose()
+            self._db_engine = None
+
     async def _write_usage_batch(self, batch: list[dict]):
         """Write a batch of usage records to the database."""
         if not settings.DATABASE_URL:
@@ -88,10 +105,11 @@ class TaskWorker:
             return
 
         try:
-            from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
             from sqlalchemy import text
 
-            engine = create_async_engine(settings.DATABASE_URL, pool_size=5)
+            engine = await self._get_db_engine()
+            if engine is None:
+                return
             async with engine.begin() as conn:
                 for record in batch:
                     await conn.execute(
@@ -106,7 +124,6 @@ class TaskWorker:
                             "timestamp": record.get("timestamp", datetime.now(timezone.utc).isoformat()),
                         },
                     )
-            await engine.dispose()
         except Exception as e:
             log.error("Failed to write usage batch to DB: %s", e)
             # Re-queue on failure (with dead-letter after 3 retries)
@@ -169,27 +186,4 @@ class TaskWorker:
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                log.error("Cleanup task error: %s", e)
-
-
-async def main():
-    worker = TaskWorker()
-
-    # Handle graceful shutdown
-    loop = asyncio.get_event_loop()
-    for sig in (signal.SIGTERM, signal.SIGINT):
-        try:
-            loop.add_signal_handler(sig, lambda: asyncio.create_task(worker.stop()))
-        except NotImplementedError:
-            # Windows doesn't support add_signal_handler
-            pass
-
-    await worker.start()
-
-    # Keep running until stopped
-    while worker._running:
-        await asyncio.sleep(1)
-
-
-if __name__ == "__main__":
-    asyncio.run(main())
+                log.erro

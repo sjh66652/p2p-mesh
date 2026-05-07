@@ -3,6 +3,8 @@ Authentication API routes - login, register, token refresh.
 Prefix: /api/auth
 """
 
+import hashlib
+
 from fastapi import APIRouter, Depends, HTTPException, status, Body, Request
 from fastapi.security import HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,16 +23,43 @@ from shared.app.audit import audit_log, AuditActions
 router = APIRouter(dependencies=[Depends(check_usage_quota)])
 
 
+async def _check_registration_rate_limit(redis_client, client_ip: str):
+    """Rate limit registrations per IP: max 5 per hour."""
+    key = f"reg_rate_limit:{client_ip}"
+    count = await redis_client.get(key)
+    if count and int(count) >= 5:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many registration attempts. Please try again later.",
+        )
+    pipe = redis_client.pipeline()
+    pipe.incr(key)
+    pipe.expire(key, 3600)
+    await pipe.execute()
+
+
+def hash_email(email: str) -> str:
+    """Hash an email address for audit logging (prevents PII leakage)."""
+    from app.config import settings
+    return hashlib.sha256((email + settings.JWT_SECRET).encode()).hexdigest()[:16]
+
+
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 async def register(
     data: UserRegister,
     request: Request,
     db: AsyncSession = Depends(get_db),
+    redis_client=Depends(get_redis),
 ):
     """Register a new user account."""
+    client_ip = request.client.host if request.client else "unknown"
+
+    # Rate limit registrations per IP
+    if redis_client:
+        await _check_registration_rate_limit(redis_client, client_ip)
+
     try:
         user = await auth_service.register_user(db, data)
-        client_ip = request.client.host if request.client else "unknown"
         await audit_log(str(user.id), AuditActions.USER_REGISTER, client_ip)
         return user
     except ValueError as e:
@@ -64,7 +93,7 @@ async def login(
         await audit_log(user_id, AuditActions.USER_LOGIN, client_ip)
         return token_data
     except ValueError as e:
-        await audit_log(data.email, AuditActions.USER_LOGIN_FAILED, client_ip)
+        await audit_log(hash_email(data.email), AuditActions.USER_LOGIN_FAILED, client_ip)
         # Generic error -- don't reveal whether email exists
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -122,31 +151,4 @@ async def get_profile(user=Depends(get_current_user)):
     return user
 
 
-@router.patch("/me", response_model=UserResponse)
-async def update_profile(
-    data: UserUpdate,
-    user=Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    """Update user profile. Only whitelisted fields can be modified."""
-    try:
-        updated = await auth_service.update_user(
-            db, user, data.model_dump(exclude_unset=True)
-        )
-        return updated
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-
-
-@router.post("/change-password", status_code=status.HTTP_204_NO_CONTENT)
-async def change_password(
-    data: PasswordChange,
-    user=Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    """Change password (requires current password)."""
-    try:
-        await auth_service.change_password(db, user, data.old_password, data.new_password)
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-
+@router.patch("/me", response_model

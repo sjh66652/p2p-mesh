@@ -136,9 +136,6 @@ pub async fn run_stun_server(bind_addr: &str) -> Result<(), std::io::Error> {
         log::trace!("STUN request from {}: {}", src, msg);
 
         if msg.trim() == "ping" {
-            let response = format!("{}:{}", src.ip(), src.port());
-            socket.send_to(response.as_bytes(), src).await?;
-            log::debug!("STUN response to {}: {}", src, response);
-        }
-    }
-}
+            // SECURITY (reflection/amplification): This STUN server responds
+            // to any "ping" with the sender's IP:port. An attacker could spoof
+            // a victim's IP as the source to trick thi

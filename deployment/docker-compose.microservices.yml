@@ -14,7 +14,7 @@ services:
   # Routes to individual microservices by path prefix.
   # ============================================================
   nginx:
-    image: nginx:1.25-alpine
+    image: nginx:1.25.5-alpine
     ports:
       - "80:80"
       - "443:443"
@@ -245,7 +245,7 @@ services:
   # PostgreSQL 16 — Primary database (shared across all services)
   # ============================================================
   postgres:
-    image: postgres:16-alpine
+    image: postgres:16.4-alpine
     environment:
       POSTGRES_USER: mesh
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
@@ -268,7 +268,7 @@ services:
   # Redis 7 — Cache, signaling pub/sub, rate limit counters
   # ============================================================
   redis:
-    image: redis:7-alpine
+    image: redis:7.4-alpine
     ports:
       - "127.0.0.1:6379:6379"
     volumes:
@@ -316,7 +316,7 @@ services:
   # Prometheus — Metrics collection
   # ============================================================
   prometheus:
-    image: prom/prometheus:latest
+    image: prom/prometheus:v2.55.0
     ports:
       - "127.0.0.1:9090:9090"
     volumes:
@@ -334,12 +334,13 @@ services:
   # Grafana — Metrics dashboards
   # ============================================================
   grafana:
-    image: grafana/grafana:latest
+    image: grafana/grafana:11.3.0
     ports:
       - "127.0.0.1:3000:3000"
     environment:
       - GF_SECURITY_ADMIN_USER=${GRAFANA_USER:-admin}
-      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD}
+      # If empty, Grafana won't start (enforced for security)
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-}
       - GF_AUTH_ANONYMOUS_ENABLED=false
     volumes:
       - grafana_data:/var/lib/grafana
@@ -399,9 +400,3 @@ volumes:
   postgres_data:
   redis_data:
   prometheus_data:
-  grafana_data:
-  loki_data:
-
-networks:
-  mesh-net:
-    driver: bridge

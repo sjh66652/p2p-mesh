@@ -240,11 +240,27 @@ pub async fn establish_p2p_connection(
         peer_id, our_candidates.len(), peer_candidates.len()
     );
 
-    let hmac_key = b"mesh-punch-hmac"; // In production: use a proper shared secret
+    // Derive HMAC key from environment or generate a per-session random key.
+    // In production, this should be derived from the ECDH key exchange.
+    let hmac_key = std::env::var("PUNCH_HMAC_KEY")
+        .map(|k| k.into_bytes())
+        .unwrap_or_else(|_| {
+            // Fallback: derive per-session HMAC key from random bytes
+            // This provides some protection against replay but not against active MitM
+            let mut key = [0u8; 32];
+            use rand::RngCore;
+            rand::thread_rng().fill_bytes(&mut key);
+            log::warn!(
+                "PUNCH_HMAC_KEY not set — using per-session random HMAC key. \
+                 Peer authentication requires matching keys on both sides. \
+                 Set PUNCH_HMAC_KEY for production deployments."
+            );
+            key.to_vec()
+        });
 
     let punch_result = puncher::execute_punch(
         socket.clone(),
-        hmac_key,
+        &hmac_key,
         peer_id,
         our_device_id,
         &our_candidates,
@@ -256,26 +272,4 @@ pub async fn establish_p2p_connection(
     match punch_result {
         Ok(direct_addr) => {
             log::info!("Direct P2P connection established to {} at {}", peer_id, direct_addr);
-            multi_path.mark_active(peer_id, &PathType::Direct).await;
-
-            let session_key = SessionKey::generate();
-            Ok((PathType::Direct, session_key))
-        }
-        Err(e) => {
-            log::warn!(
-                "Hole punch to {} failed: {}. Falling back to relay.",
-                peer_id, e
-            );
-
-            // Fall back to relay
-            if let Some(relay) = relay_addr {
-                multi_path.mark_active(peer_id, &PathType::Relay).await;
-                let session_key = SessionKey::generate();
-                log::info!("Using relay path for {} via {}", peer_id, relay);
-                Ok((PathType::Relay, session_key))
-            } else {
-                Err(format!("No path to {} available (punch failed, no relay)", peer_id))
-            }
-        }
-    }
-}
+            multi_path.mark_active(peer_id, &PathType::Direct).

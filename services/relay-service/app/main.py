@@ -210,7 +210,7 @@ app.add_middleware(MetricsMiddleware)
 # CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Nginx should restrict this at the edge
+    allow_origins=settings.CORS_ORIGINS if hasattr(settings, 'CORS_ORIGINS') else ["http://localhost:3000"],
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
     allow_headers=["Authorization", "Content-Type"],
@@ -233,5 +233,4 @@ async def health_check():
     return {
         "status": "healthy",
         "db": app.state.db_ok,
-        "redis": app.state.redis_ok,
-    }
+ 

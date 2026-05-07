@@ -22,7 +22,11 @@ def setup_tracing(service_name: str):
         provider = TracerProvider(resource=resource)
 
         otlp_endpoint = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://jaeger:4317")
-        exporter = OTLPSpanExporter(endpoint=otlp_endpoint, insecure=True)
+        use_insecure = os.getenv("OTEL_INSECURE", "false").lower() == "true"
+        exporter = OTLPSpanExporter(
+            endpoint=otlp_endpoint,
+            insecure=use_insecure,  # Require TLS in production
+        )
         provider.add_span_processor(BatchSpanProcessor(exporter))
 
         trace.set_tracer_provider(provider)
@@ -34,7 +38,4 @@ def setup_tracing(service_name: str):
     except ImportError:
         import logging
         logging.getLogger("opentelemetry").warning(
-            "OpenTelemetry packages not installed. Install with: pip install opentelemetry-api "
-            "opentelemetry-sdk opentelemetry-exporter-otlp opentelemetry-instrumentation-fastapi"
-        )
-        return None
+            "OpenTelemetry packages not installed. Install with: pip install

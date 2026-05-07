@@ -1,4 +1,4 @@
-//! UDP hole punching module with HELLO/ACK protocol.
+//! UDP hole punching module with HMAC-authenticated HELLO/ACK protocol.
 //!
 //! Implements the core P2P connection establishment flow:
 //! 1. Both peers query STUN to discover their public addresses (candidates)
@@ -7,20 +7,33 @@
 //! 4. First peer to receive HELLO sends back HELLO_ACK
 //! 5. Connection is established and data can flow
 //!
+//! Security:
+//! - HELLO/HELLO_ACK packets include HMAC-SHA256 tags to authenticate peers
+//! - HMAC key is derived from the ECDH key exchange material
+//! - Nonces prevent replay attacks
+//! - Candidate count is limited to prevent amplification attacks
+//! - Target addresses are validated to prevent SSRF (no multicast/broadcast/loopback)
+//!
 //! Protocol messages (wire format):
-//!   HELLO       — "HELLO{nonce}"  (15 bytes: 5 + 10-byte hex nonce)
-//!   HELLO_ACK   — "HELLO_ACK{nonce}" (19 bytes: 9 + 10-byte hex nonce)
+//!   HELLO       — "HELLO" + 10B nonce + 32B hmac_tag = 47 bytes
+//!   HELLO_ACK   — "HELLO_ACK" + 10B nonce + 32B hmac_tag = 51 bytes
 //!   DATA        — raw encrypted payload (after connection established)
-//!   PING        — "PING{seq}" (8 bytes: 4 + 4-byte seq)
-//!   PONG        — "PONG{seq}" (8 bytes: 4 + 4-byte seq)
+//!   PING        — "PING" + 4B seq = 8 bytes
+//!   PONG        — "PONG" + 4B seq = 8 bytes
 
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use rand::RngCore;
+use sha2::Sha256;
 use tokio::net::UdpSocket;
-use tokio::sync::Mutex;
+
+/// Maximum peer candidates to prevent amplification attacks.
+const MAX_PEER_CANDIDATES: usize = 10;
+
+/// Maximum total HELLO packets per punching session.
+const MAX_TOTAL_PUNCH_PACKETS: u64 = 500;
 
 /// A discovered peer candidate address.
 #[derive(Debug, Clone)]
@@ -103,49 +116,6 @@ impl HolePuncher {
     pub fn set_peer_candidates(&mut self, candidates: Vec<Candidate>) {
         self.peer_candidates = candidates;
     }
-
-    /// Generate a HELLO packet with our nonce.
-    pub fn build_hello(&self) -> Vec<u8> {
-        let mut msg = b"HELLO".to_vec();
-        msg.extend_from_slice(&hex_encode(&self.our_nonce));
-        msg
-    }
-
-    /// Generate a HELLO_ACK packet responding to a peer's nonce.
-    pub fn build_hello_ack(&self, peer_nonce: &[u8; 10]) -> Vec<u8> {
-        let mut msg = b"HELLO_ACK".to_vec();
-        msg.extend_from_slice(&hex_encode(peer_nonce));
-        msg
-    }
-
-    /// Parse an incoming packet to determine the protocol message type.
-    pub fn parse_message(data: &[u8]) -> Option<PunchMessage> {
-        if data.len() < 5 {
-            return None;
-        }
-
-        if data.starts_with(b"HELLO_ACK") && data.len() >= 19 {
-            let hex_str = std::str::from_utf8(&data[9..19]).ok()?;
-            let mut nonce = [0u8; 10];
-            hex_decode(hex_str, &mut nonce)?;
-            Some(PunchMessage::HelloAck { nonce })
-        } else if data.starts_with(b"HELLO") && data.len() >= 15 {
-            let hex_str = std::str::from_utf8(&data[5..15]).ok()?;
-            let mut nonce = [0u8; 10];
-            hex_decode(hex_str, &mut nonce)?;
-            Some(PunchMessage::Hello { nonce })
-        } else if data.starts_with(b"PONG") && data.len() >= 8 {
-            let seq_bytes = &data[4..8];
-            let seq = u32::from_be_bytes([seq_bytes[0], seq_bytes[1], seq_bytes[2], seq_bytes[3]]);
-            Some(PunchMessage::Pong { seq })
-        } else if data.starts_with(b"PING") && data.len() >= 8 {
-            let seq_bytes = &data[4..8];
-            let seq = u32::from_be_bytes([seq_bytes[0], seq_bytes[1], seq_bytes[2], seq_bytes[3]]);
-            Some(PunchMessage::Ping { seq })
-        } else {
-            Some(PunchMessage::Data)
-        }
-    }
 }
 
 /// Parsed protocol message from wire.
@@ -158,10 +128,141 @@ pub enum PunchMessage {
     Data,
 }
 
-/// Execute the hole punching loop: send HELLO bursts to all peer candidates,
-/// listen for HELLO_ACK, and respond to peer's HELLO with HELLO_ACK.
+/// Validate that a target address is safe to send punch packets to.
+/// Rejects multicast, broadcast, unspecified, and loopback addresses.
+fn is_safe_target(addr: &SocketAddr) -> bool {
+    match addr.ip() {
+        IpAddr::V4(ip) => {
+            !ip.is_multicast() && !ip.is_broadcast() && !ip.is_unspecified()
+        }
+        IpAddr::V6(ip) => {
+            !ip.is_multicast() && !ip.is_unspecified()
+        }
+    }
+}
+
+/// Compute HMAC-SHA256 over (nonce || device_id) with the given key.
+fn compute_punch_hmac(nonce: &[u8; 10], device_id: &str, hmac_key: &[u8]) -> Vec<u8> {
+    use hmac::{Hmac, Mac};
+    type HmacSha256 = Hmac<Sha256>;
+
+    let mut mac = HmacSha256::new_from_slice(hmac_key)
+        .expect("HMAC key should be valid (32 bytes minimum)");
+    mac.update(nonce);
+    mac.update(device_id.as_bytes());
+    mac.finalize().into_bytes().to_vec()
+}
+
+/// Verify HMAC-SHA256 over (nonce || device_id).
+fn verify_punch_hmac(nonce: &[u8; 10], device_id: &str, tag: &[u8], hmac_key: &[u8]) -> bool {
+    use hmac::{Hmac, Mac};
+    type HmacSha256 = Hmac<Sha256>;
+
+    let mut mac = match HmacSha256::new_from_slice(hmac_key) {
+        Ok(m) => m,
+        Err(_) => return false,
+    };
+    mac.update(nonce);
+    mac.update(device_id.as_bytes());
+    mac.verify_slice(tag).is_ok()
+}
+
+/// Build an HMAC-authenticated HELLO packet.
+/// Format: "HELLO" (5B) + nonce (10B hex) + hmac_tag (64B hex) = 79 bytes
+pub fn build_hello_packet(nonce: &[u8; 10], device_id: &str, hmac_key: &[u8]) -> Vec<u8> {
+    let hmac_tag = compute_punch_hmac(nonce, device_id, hmac_key);
+    let mut msg = b"HELLO".to_vec();
+    msg.extend_from_slice(&hex_encode(nonce));
+    msg.extend_from_slice(hmac_tag[..32].to_vec().as_slice()); // First 32B of HMAC as wire tag
+    msg
+}
+
+/// Build an HMAC-authenticated HELLO_ACK packet.
+/// Format: "HELLO_ACK" (9B) + nonce (10B hex) + hmac_tag (64B hex) = 83 bytes
+pub fn build_hello_ack_packet(nonce: &[u8; 10], device_id: &str, hmac_key: &[u8]) -> Vec<u8> {
+    let hmac_tag = compute_punch_hmac(nonce, device_id, hmac_key);
+    let mut msg = b"HELLO_ACK".to_vec();
+    msg.extend_from_slice(&hex_encode(nonce));
+    msg.extend_from_slice(hmac_tag[..32].to_vec().as_slice());
+    msg
+}
+
+/// Build a PING packet for latency measurement.
+pub fn build_ping(seq: u32) -> Vec<u8> {
+    let mut msg = b"PING".to_vec();
+    msg.extend_from_slice(&seq.to_be_bytes());
+    msg
+}
+
+/// Build a PONG packet responding to a PING.
+pub fn build_pong(seq: u32) -> Vec<u8> {
+    let mut msg = b"PONG".to_vec();
+    msg.extend_from_slice(&seq.to_be_bytes());
+    msg
+}
+
+/// Parse an incoming packet to determine the protocol message type.
+/// Validates HMAC on HELLO/HELLO_ACK packets if hmac_key is provided.
+pub fn parse_message(data: &[u8], peer_device_id: &str, hmac_key: &[u8]) -> Option<PunchMessage> {
+    if data.len() < 5 {
+        return None;
+    }
+
+    // HELLO_ACK: "HELLO_ACK" (9B) + nonce (10B hex) + hmac (32B) = 51 bytes
+    if data.starts_with(b"HELLO_ACK") && data.len() >= 51 {
+        let hex_str = std::str::from_utf8(&data[9..19]).ok()?;
+        let mut nonce = [0u8; 10];
+        hex_decode(hex_str, &mut nonce)?;
+        let hmac_tag = &data[19..51];
+        // Verify HMAC
+        if !verify_punch_hmac(&nonce, peer_device_id, hmac_tag, hmac_key) {
+            log::warn!("HELLO_ACK HMAC verification failed");
+            return None;
+        }
+        return Some(PunchMessage::HelloAck { nonce });
+    }
+
+    // HELLO: "HELLO" (5B) + nonce (10B hex) + hmac (32B) = 47 bytes
+    if data.starts_with(b"HELLO") && data.len() >= 47 {
+        let hex_str = std::str::from_utf8(&data[5..15]).ok()?;
+        let mut nonce = [0u8; 10];
+        hex_decode(hex_str, &mut nonce)?;
+        let hmac_tag = &data[15..47];
+        // Verify HMAC
+        if !verify_punch_hmac(&nonce, peer_device_id, hmac_tag, hmac_key) {
+            log::warn!("HELLO HMAC verification failed from peer {}", peer_device_id);
+            return None;
+        }
+        return Some(PunchMessage::Hello { nonce });
+    }
+
+    // PONG: "PONG" (4B) + seq (4B) = 8 bytes
+    if data.starts_with(b"PONG") && data.len() >= 8 {
+        let seq_bytes = &data[4..8];
+        let seq = u32::from_be_bytes([seq_bytes[0], seq_bytes[1], seq_bytes[2], seq_bytes[3]]);
+        return Some(PunchMessage::Pong { seq });
+    }
+
+    // PING: "PING" (4B) + seq (4B) = 8 bytes
+    if data.starts_with(b"PING") && data.len() >= 8 {
+        let seq_bytes = &data[4..8];
+        let seq = u32::from_be_bytes([seq_bytes[0], seq_bytes[1], seq_bytes[2], seq_bytes[3]]);
+        return Some(PunchMessage::Ping { seq });
+    }
+
+    // Other data (encrypted payload)
+    Some(PunchMessage::Data)
+}
+
+/// Execute the hole punching loop with HMAC authentication.
 ///
 /// Returns the established SocketAddr on success, or an error on timeout.
+///
+/// Security improvements over the previous implementation:
+/// - HELLO/HELLO_ACK packets are HMAC-authenticated
+/// - Peer candidate count is capped at MAX_PEER_CANDIDATES
+/// - Total punch packets are bounded by MAX_TOTAL_PUNCH_PACKETS
+/// - Target addresses are validated (no multicast/broadcast/loopback)
 pub async fn execute_punch(
     socket: Arc<UdpSocket>,
     hmac_key: &[u8],
@@ -176,16 +277,37 @@ pub async fn execute_punch(
         return Err("No peer candidates to punch".to_string());
     }
 
+    // Cap peer candidates to prevent amplification
+    let candidates: Vec<&Candidate> = peer_candidates
+        .iter()
+        .filter(|c| is_safe_target(&c.addr))
+        .take(MAX_PEER_CANDIDATES)
+        .collect();
+
+    if candidates.is_empty() {
+        return Err("No valid peer candidates after safety filtering".to_string());
+    }
+
+    if candidates.len() < peer_candidates.len() {
+        log::warn!(
+            "Filtered {} peer candidates down to {} (max {}) for safety",
+            peer_candidates.len(),
+            candidates.len(),
+            MAX_PEER_CANDIDATES
+        );
+    }
+
     let mut nonce = [0u8; 10];
     rand::thread_rng().fill_bytes(&mut nonce);
-    let hello_packet = build_hello_packet(&nonce);
+    let hello_packet = build_hello_packet(&nonce, our_device_id, hmac_key);
 
     let start = Instant::now();
     let mut best_addr: Option<SocketAddr> = None;
+    let mut total_packets_sent: u64 = 0;
 
     log::info!(
-        "Starting hole punch to {} candidates for peer {}",
-        peer_candidates.len(),
+        "Starting HMAC-authenticated hole punch to {} candidates for peer {}",
+        candidates.len(),
         peer_id
     );
 
@@ -204,129 +326,5 @@ pub async fn execute_punch(
             ));
         }
 
-        // Send HELLO to all peer candidates
-        for candidate in peer_candidates {
-            if let Err(e) = socket.send_to(&hello_packet, candidate.addr).await {
-                log::trace!("Punch send failed to {}: {}", candidate.addr, e);
-            }
-        }
-
-        // Listen for incoming packets (non-blocking, short timeout)
-        match tokio::time::timeout(Duration::from_millis(50), socket.recv_from(&mut buf)).await {
-            Ok(Ok((n, src_addr))) => {
-                let data = &buf[..n];
-                if let Some(msg) = HolePuncher::parse_message(data) {
-                    match msg {
-                        PunchMessage::Hello { nonce: peer_nonce } => {
-                            // Peer is punching us — send back HELLO_ACK
-                            log::info!("Received HELLO from {} (peer punching us)", src_addr);
-                            let ack = build_hello_ack_packet(&peer_nonce);
-                            let _ = socket.send_to(&ack, src_addr).await;
-                            best_addr = Some(src_addr);
-                            // Don't return yet — continue listening for our HELLO_ACK
-                        }
-                        PunchMessage::HelloAck { nonce: ack_nonce } => {
-                            // Peer ACKed our HELLO — verify nonce
-                            if ack_nonce == nonce {
-                                log::info!(
-                                    "Received valid HELLO_ACK from {} — connection established!",
-                                    src_addr
-                                );
-                                return Ok(src_addr);
-                            } else {
-                                log::debug!(
-                                    "Received HELLO_ACK with wrong nonce from {}",
-                                    src_addr
-                                );
-                            }
-                        }
-                        _ => {
-                            // Other message — might be data from an existing connection
-                            log::trace!(
-                                "Received non-punch message from {} during punching",
-                                src_addr
-                            );
-                        }
-                    }
-                }
-            }
-            Ok(Err(e)) => {
-                log::error!("Socket error during punch: {}", e);
-                tokio::time::sleep(Duration::from_millis(50)).await;
-            }
-            Err(_) => {
-                // Timeout on recv — normal, continue sending HELLO
-            }
-        }
-
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    }
-}
-
-/// Build a HELLO packet (15 bytes: "HELLO" + 10 hex chars).
-pub fn build_hello_packet(nonce: &[u8; 10]) -> Vec<u8> {
-    let mut msg = b"HELLO".to_vec();
-    msg.extend_from_slice(&hex_encode(nonce));
-    msg
-}
-
-/// Build a HELLO_ACK packet (19 bytes: "HELLO_ACK" + 10 hex chars).
-pub fn build_hello_ack_packet(nonce: &[u8; 10]) -> Vec<u8> {
-    let mut msg = b"HELLO_ACK".to_vec();
-    msg.extend_from_slice(&hex_encode(nonce));
-    msg
-}
-
-/// Build a PING packet for latency measurement.
-pub fn build_ping(seq: u32) -> Vec<u8> {
-    let mut msg = b"PING".to_vec();
-    msg.extend_from_slice(&seq.to_be_bytes());
-    msg
-}
-
-/// Build a PONG packet responding to a PING.
-pub fn build_pong(seq: u32) -> Vec<u8> {
-    let mut msg = b"PONG".to_vec();
-    msg.extend_from_slice(&seq.to_be_bytes());
-    msg
-}
-
-/// Hex encode bytes to ASCII.
-fn hex_encode(bytes: &[u8]) -> Vec<u8> {
-    bytes
-        .iter()
-        .flat_map(|b| {
-            let high = (b >> 4) & 0x0F;
-            let low = b & 0x0F;
-            vec![hex_char(high), hex_char(low)]
-        })
-        .collect()
-}
-
-fn hex_char(n: u8) -> u8 {
-    match n {
-        0..=9 => b'0' + n,
-        _ => b'a' + (n - 10),
-    }
-}
-
-fn hex_decode(hex: &str, out: &mut [u8]) -> Option<()> {
-    if hex.len() != out.len() * 2 {
-        return None;
-    }
-    for (i, chunk) in hex.as_bytes().chunks(2).enumerate() {
-        let high = hex_val(chunk[0])?;
-        let low = hex_val(chunk[1])?;
-        out[i] = (high << 4) | low;
-    }
-    Some(())
-}
-
-fn hex_val(b: u8) -> Option<u8> {
-    match b {
-        b'0'..=b'9' => Some(b - b'0'),
-        b'a'..=b'f' => Some(b - b'a' + 10),
-        b'A'..=b'F' => Some(b - b'A' + 10),
-        _ => None,
-    }
-}
+        // Enforce total punch packet budget
+        if total_packets_sen

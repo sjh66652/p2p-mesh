@@ -36,6 +36,9 @@ clap = { version = "4", features = ["derive", "env"] }
 # Base64 encoding for keys
 base64 = "0.22"
 
+# X25519 ECDH key exchange
+x25519-dalek = "2"
+
 # SHA-256 for hashing
 sha2 = "0.10"
 
@@ -67,5 +70,4 @@ name = "mesh-relay"
 path = "src/bin/mesh-relay.rs"
 
 [[bin]]
-name = "mesh-stun"
-path = "src/bin/mesh-stun.rs"
+na

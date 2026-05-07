@@ -2,6 +2,7 @@
 Authentication service - JWT, password hashing, brute-force protection.
 """
 
+import logging
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -14,6 +15,8 @@ from sqlalchemy import select
 from app.config import settings
 from app.models.user import User, UserPlan, UserRole
 from app.schemas.user import UserRegister, UserLogin
+
+logger = logging.getLogger("auth_service")
 
 
 # -- Password hashing with constant-time comparison --
@@ -56,13 +59,14 @@ def create_access_token(user_id: uuid.UUID, role: str = "user") -> dict:
     }
 
 
-def create_refresh_token(user_id: uuid.UUID) -> str:
+def create_refresh_token(user_id: uuid.UUID, role: str = "user") -> str:
     """Create a long-lived refresh token stored in Redis."""
     now = datetime.now(timezone.utc)
     jti = secrets.token_hex(16)
 
     payload = {
         "sub": str(user_id),
+        "role": role,
         "jti": jti,
         "type": "refresh",
         "iat": now,
@@ -116,7 +120,7 @@ async def register_user(db: AsyncSession, data: UserRegister) -> User:
 # -- Login with brute-force protection --
 
 async def login_user(
-    db: AsyncSession, data: UserLogin, redis_client=None
+    db: AsyncSession, data: UserLogin, redis_client=None, device_id: str = None
 ) -> dict:
     """
     Authenticate a user. Enforces brute-force lockout via Redis.
@@ -129,8 +133,11 @@ async def login_user(
         attempts = await redis_client.get(lockout_key)
         if attempts and int(attempts) >= settings.LOGIN_MAX_ATTEMPTS:
             ttl = await redis_client.ttl(lockout_key)
+            logger.warning(
+                "Login lockout triggered for %s (ttl=%ds)", data.email, ttl
+            )
             raise ValueError(
-                f"Account locked due to too many failed attempts. Try again in {ttl // 60 + 1} minutes."
+                "Too many login attempts. Please try again later."
             )
 
     result = await db.execute(select(User).where(User.email == data.email))
@@ -152,23 +159,30 @@ async def login_user(
     if redis_client:
         await redis_client.delete(lockout_key)
 
+    # Generate a device_id for session isolation if not provided
+    if not device_id:
+        device_id = secrets.token_hex(16)
+
     # Create tokens
     token_data = create_access_token(user.id, role=user.role.value)
-    refresh_token = create_refresh_token(user.id)
+    refresh_token = create_refresh_token(user.id, role=user.role.value)
 
-    # Store refresh token in Redis for revocation
+    # Store refresh token in Redis for revocation (session-isolated key)
     if redis_client:
         await redis_client.setex(
-            f"refresh_token:{user.id}",
+            f"refresh_token:{user.id}:{device_id}",
             settings.JWT_REFRESH_EXPIRE_DAYS * 86400,
             refresh_token,
         )
 
     token_data["refresh_token"] = refresh_token
+    token_data["device_id"] = device_id
     return token_data
 
 
-async def refresh_access_token(refresh_token_str: str, redis_client) -> dict:
+async def refresh_access_token(
+    refresh_token_str: str, redis_client, db: AsyncSession = None
+) -> dict:
     """Issue a new access token using a valid refresh token."""
     try:
         payload = jwt.decode(
@@ -182,12 +196,42 @@ async def refresh_access_token(refresh_token_str: str, redis_client) -> dict:
 
     user_id = uuid.UUID(payload["sub"])
 
-    # Verify stored in Redis (not revoked)
+    # Verify stored in Redis (not revoked) - scan all device sessions
     stored = await redis_client.get(f"refresh_token:{user_id}")
-    if stored != refresh_token_str:
-        raise ValueError("Refresh token has been revoked")
+    if stored is not None:
+        # Legacy single-session key — still check it for backwards compatibility
+        if stored != refresh_token_str:
+            raise ValueError("Refresh token has been revoked")
+    else:
+        # Check composite keys (session-isolated)
+        cursor = 0
+        found = False
+        while True:
+            cursor, keys = await redis_client.scan(
+                cursor, match=f"refresh_token:{user_id}:*", count=100
+            )
+            for key in keys:
+                val = await redis_client.get(key)
+                if val == refresh_token_str:
+                    found = True
+                    break
+            if cursor == 0 or found:
+                break
+        if not found:
+            raise ValueError("Refresh token has been revoked")
 
-    return create_access_token(user_id, role=payload.get("role", "user"))
+    # Re-fetch user from DB to get current role (prevents stale role in token)
+    role = "user"
+    if db:
+        result = await db.execute(select(User).where(User.id == user_id))
+        user = result.scalar_one_or_none()
+        if not user:
+            raise ValueError("User not found")
+        role = user.role.value
+    else:
+        role = payload.get("role", "user")
+
+    return create_access_token(user_id, role=role)
 
 
 # -- Update with field whitelist (prevents role/plan escalation) --
@@ -202,50 +246,4 @@ async def update_user(db: AsyncSession, user: User, data: dict) -> User:
     for key, value in data.items():
         if value is not None and key in ALLOWED_UPDATE_FIELDS and hasattr(user, key):
             setattr(user, key, value)
-    await db.flush()
-    await db.refresh(user)
-    return user
-
-
-async def change_password(
-    db: AsyncSession, user: User, old_password: str, new_password: str
-):
-    """Change password with strength validation and old-password verification."""
-    _validate_password_strength(new_password)
-
-    if not verify_password(old_password, user.password_hash):
-        raise ValueError("Current password is incorrect")
-
-    user.password_hash = hash_password(new_password)
-    await db.flush()
-
-
-async def logout_user(redis_client, token: str):
-    """
-    Blacklist a JWT access token. Also revoke the user's refresh token.
-    """
-    try:
-        payload = jwt.decode(
-            token, settings.JWT_SECRET,
-            algorithms=[settings.JWT_ALGORITHM],
-            options={"verify_exp": False},  # Allow expired tokens for logout
-        )
-        jti = payload.get("jti", "")
-        user_id = payload.get("sub", "")
-        exp = payload.get("exp", 0)
-        now = datetime.now(timezone.utc).timestamp()
-        ttl = max(int(exp - now), 1)
-
-        # Blacklist access token by jti
-        if jti:
-            await redis_client.setex(f"jwt_blacklist:{jti}", ttl, "1")
-        # Revoke refresh token
-        if user_id:
-            await redis_client.delete(f"refresh_token:{user_id}")
-    except JWTError:
-        pass  # Token already invalid, nothing to do
-
-
-async def get_user_by_id(db: AsyncSession, user_id: uuid.UUID) -> User | None:
-    result = await db.execute(select(User).where(User.id == user_id))
-    return result.scalar_one_or_none()
+    await db.

@@ -14,6 +14,27 @@ logger = logging.getLogger("audit")
 
 AUDIT_QUEUE = "queue:logs"
 
+# Module-level connection pool
+_redis_pool = None
+
+
+async def _get_redis(redis_url: str = None):
+    """Get a Redis connection from the module-level pool."""
+    global _redis_pool
+    if not redis_url:
+        redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+    if _redis_pool is None:
+        _redis_pool = redis.ConnectionPool.from_url(redis_url, decode_responses=True)
+    return redis.Redis(connection_pool=_redis_pool)
+
+
+async def close_audit_redis():
+    """Close the module-level Redis connection pool."""
+    global _redis_pool
+    if _redis_pool is not None:
+        await _redis_pool.disconnect()
+        _redis_pool = None
+
 
 async def audit_log(
     user_id: str = "anonymous",
@@ -37,30 +58,9 @@ async def audit_log(
     # Log locally
     logger.info("AUDIT: %s", json.dumps(event))
 
-    # Queue for persistent storage
+    # Queue for persistent storage (using connection pool)
     try:
-        r = redis.from_url(redis_url, decode_responses=True)
+        r = await _get_redis(redis_url)
         await r.rpush(AUDIT_QUEUE, json.dumps(event))
-        await r.close()
     except Exception as e:
-        logger.warning("Failed to queue audit event: %s", e)
-
-
-# Common audit actions
-class AuditActions:
-    USER_REGISTER = "user.register"
-    USER_LOGIN = "user.login"
-    USER_LOGIN_FAILED = "user.login.failed"
-    USER_LOGOUT = "user.logout"
-    USER_UPDATE = "user.update"
-    USER_DELETE = "user.delete"
-    DEVICE_REGISTER = "device.register"
-    DEVICE_DELETE = "device.delete"
-    WS_CONNECT = "ws.connect"
-    WS_DISCONNECT = "ws.disconnect"
-    RELAY_REGISTER = "relay.register"
-    RELAY_HEARTBEAT = "relay.heartbeat"
-    QUOTA_EXCEEDED = "quota.exceeded"
-    USER_BANNED = "user.banned"
-    PLAN_CHANGED = "plan.changed"
-    ADMIN_ACTION = "admin.action"
+        logger.warning("Failed to queue 

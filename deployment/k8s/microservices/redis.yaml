@@ -33,6 +33,13 @@ spec:
       containers:
         - name: redis
           image: redis:7-alpine
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 999
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: false
           command:
             - redis-server
             - --appendonly
@@ -61,10 +68,4 @@ spec:
               cpu: 100m
               memory: 128Mi
             limits:
-              cpu: 500m
-              memory: 512Mi
-          readinessProbe:
-            exec:
-              command: ["redis-cli", "--no-auth-warning", "ping"]
-            initialDelaySeconds: 5
-            periodSeconds: 10
+  

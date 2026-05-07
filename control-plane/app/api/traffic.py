@@ -4,10 +4,12 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 
 from app.config import settings
 from app.database import get_db
 from app.dependencies import get_current_user
+from app.models.device import Device
 from app.schemas.traffic import TrafficReport, TrafficReportBatch
 from app.services import billing_service
 
@@ -48,9 +50,6 @@ async def report_traffic(
     _validate_traffic_report(data)
 
     # Verify device belongs to user
-    from app.models.device import Device
-    from sqlalchemy import select
-
     result = await db.execute(
         select(Device).where(Device.id == data.device_id, Device.user_id == user.id)
     )
@@ -91,6 +90,17 @@ async def report_traffic_batch(
     count = 0
     for report in data.reports:
         _validate_traffic_report(report)
+
+        # Verify device belongs to user
+        result = await db.execute(
+            select(Device).where(Device.id == report.device_id, Device.user_id == user.id)
+        )
+        if not result.scalar_one_or_none():
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Device {report.device_id} not found or does not belong to you",
+            )
+
         await billing_service.report_traffic(
             db,
             user_id=user.id,
@@ -117,17 +127,4 @@ async def get_traffic_summary(
 ):
     """Get traffic usage summary for the current user."""
     start = datetime.fromisoformat(period_start) if period_start else None
-    end = datetime.fromisoformat(period_end) if period_end else None
-    return await billing_service.get_user_traffic_summary(
-        db, user.id, period_start=start, period_end=end
-    )
-
-
-@router.get("/qos")
-async def get_qos_policy(user=Depends(get_current_user)):
-    """Get the QoS policy for the current user."""
-    limit = billing_service.apply_qos(user.plan.value)
-    return {
-        "plan": user.plan.value,
-        "bandwidth_limit": limit,
-    }
+    end = datetime.fromisoformat(period_end) if period_end

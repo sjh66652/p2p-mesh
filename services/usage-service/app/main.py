@@ -141,7 +141,7 @@ app.add_middleware(MetricsMiddleware)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=settings.CORS_ORIGINS if hasattr(settings, 'CORS_ORIGINS') else ["http://localhost:3000"],
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
     allow_headers=["Authorization", "Content-Type", "X-Internal-API-Key"],
@@ -150,7 +150,7 @@ app.add_middleware(
 
 app.add_middleware(
     TrustedHostMiddleware,
-    allowed_hosts=["*"],
+    allowed_hosts=settings.ALLOWED_HOSTS if hasattr(settings, 'ALLOWED_HOSTS') else ["localhost", "127.0.0.1"],
 )
 
 # ---- API Router ----
@@ -184,7 +184,4 @@ async def metrics(request: Request):
 
     client_ip = request.client.host if request.client else ""
     if not (client_ip.startswith("172.") or client_ip.startswith("10.") or client_ip == "127.0.0.1"):
-        return Response(status_code=403, content="Forbidden")
-
-    from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
-    return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
+        return Response(status_code=403, c

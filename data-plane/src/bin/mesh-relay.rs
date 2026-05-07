@@ -16,12 +16,22 @@ use clap::Parser;
 use p2p_mesh_dataplane::relay::{self, ForwardingTable};
 use tokio::net::UdpSocket;
 
+/// Emit a warning if a plaintext HTTP URL is used for a non-localhost target.
+fn warn_plaintext_http(url: &str, label: &str) {
+    if url.starts_with("http://") && !url.contains("localhost") && !url.contains("127.0.0.1") {
+        log::warn!(
+            "{} uses plain HTTP ({}) — traffic is NOT encrypted. Use HTTPS in production.",
+            label, url
+        );
+    }
+}
+
 /// P2P Mesh Network Relay Node
 #[derive(Parser, Debug)]
 #[command(name = "mesh-relay")]
 struct Args {
     /// Control plane API URL — reads API_URL env var.
-    #[arg(long, env = "API_URL", default_value = "http://localhost:8000")]
+    #[arg(long, env = "API_URL", default_value = "https://localhost:8443")]
     api_url: String,
 
     /// Relay auth token — reads RELAY_AUTH_TOKEN env var.
@@ -62,6 +72,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "Starting mesh-relay {} in region {} on port {}",
         args.relay_id, args.region, args.port
     );
+
+    warn_plaintext_http(&args.api_url, "API URL");
 
     let bind_addr: SocketAddr = format!("0.0.0.0:{}", args.port).parse()?;
     let socket = UdpSocket::bind(bind_addr).await?;
@@ -125,20 +137,4 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 Err(e) => log::error!("Heartbeat failed: {}", e),
             }
-        }
-    });
-
-    tokio::select! {
-        _ = relay_task => log::error!("Relay loop exited unexpectedly"),
-        _ = heartbeat_task => log::error!("Heartbeat loop exited unexpectedly"),
-    }
-
-    Ok(())
-}
-
-fn get_local_ip() -> Option<String> {
-    use std::net::UdpSocket;
-    let socket = UdpSocket::bind("0.0.0.0:0").ok()?;
-    socket.connect("8.8.8.8:80").ok()?;
-    socket.local_addr().ok().map(|addr| addr.ip().to_string())
-}
+      

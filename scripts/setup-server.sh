@@ -38,8 +38,8 @@ ufw --force enable
 
 # 6. 生成 DH 参数（用于 SSL）
 echo "[6/7] Generating DH parameters (this takes a few minutes)..."
-openssl dhparam -out /etc/nginx/dhparam.pem 2048 2>/dev/null || \
-    openssl dhparam -dsaparam -out /etc/nginx/dhparam.pem 2048
+openssl dhparam -out /etc/nginx/dhparam.pem 4096 2>/dev/null || \
+    openssl dhparam -dsaparam -out /etc/nginx/dhparam.pem 4096
 
 # 7. 创建项目目录
 echo "[7/7] Creating project directory..."

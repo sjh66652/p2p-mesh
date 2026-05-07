@@ -20,7 +20,7 @@ services:
   # Routes to individual microservices by path prefix.
   # ============================================================
   nginx:
-    image: nginx:1.25-alpine
+    image: nginx:1.25.5-alpine
     ports:
       - "80:80"
       - "443:443"
@@ -308,7 +308,7 @@ services:
   # PostgreSQL 16 — Primary database (shared across all services)
   # ============================================================
   postgres:
-    image: postgres:16-alpine
+    image: postgres:16.4-alpine
     environment:
       POSTGRES_USER: mesh
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
@@ -341,7 +341,7 @@ services:
   # Redis 7 — Cache, signaling pub/sub, rate limit counters
   # ============================================================
   redis:
-    image: redis:7-alpine
+    image: redis:7.4-alpine
     volumes:
       - redis_data:/data
     command: >
@@ -400,7 +400,7 @@ services:
   # Prometheus — Metrics collection
   # ============================================================
   prometheus:
-    image: prom/prometheus:latest
+    image: prom/prometheus:v2.55.0
     volumes:
       - ../monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus_data:/prometheus
@@ -421,10 +421,11 @@ services:
   # Grafana — Metrics dashboards
   # ============================================================
   grafana:
-    image: grafana/grafana:latest
+    image: grafana/grafana:11.3.0
     environment:
       - GF_SECURITY_ADMIN_USER=${GRAFANA_USER:-admin}
-      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD}
+      # If empty, Grafana won't start (enforced for security)
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-}
       - GF_AUTH_ANONYMOUS_ENABLED=false
       - GF_SERVER_ROOT_URL=https://monitor.yourdomain.com
     volumes:
@@ -444,9 +445,4 @@ services:
 volumes:
   postgres_data:
   redis_data:
-  prometheus_data:
-  grafana_data:
-
-networks:
-  mesh-net:
-    driver: bridge
+  prom
