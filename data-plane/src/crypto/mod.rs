@@ -139,7 +139,7 @@ pub fn decrypt(key: &SessionKey, data: &[u8]) -> Option<Vec<u8>> {
 /// SECURITY: Only use at DEBUG/TRACE level. Never log full key material.
 pub fn key_fingerprint(key: &SessionKey) -> String {
     let mut hasher = Sha256::new();
-    hasher.update(&key.key);
+    hasher.update(key.key);
     let hash = hasher.finalize();
     hex::encode(&hash[..4])
 }

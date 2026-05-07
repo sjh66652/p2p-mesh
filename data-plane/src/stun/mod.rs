@@ -194,7 +194,7 @@ pub async fn run_stun_server(bind_addr: &str) -> Result<(), std::io::Error> {
         }
 
         // Periodically clean up old entries (every ~256 requests on average)
-        if rand::thread_rng().next_u32() % 256 == 0 {
+        if rand::thread_rng().next_u32().is_multiple_of(256) {
             let mut limits = rate_limits.lock().await;
             let now = Instant::now();
             limits.retain(|_, v| now.duration_since(v.window_start) < rate_limit_window * 3);

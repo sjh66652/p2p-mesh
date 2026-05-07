@@ -137,7 +137,7 @@ impl OverlayNetwork {
         // Send via tunnel
         let tunnels = self.tunnel_manager.lock().await;
         tunnels.send_to(peer_id, packet).await
-            .map_err(|e| OverlayError::TunnelError(e))?;
+            .map_err(OverlayError::TunnelError)?;
 
         Ok(())
     }
@@ -148,7 +148,7 @@ impl OverlayNetwork {
     /// The OS then delivers it to the appropriate application.
     pub async fn process_inbound(&self, packet: &[u8]) -> Result<(), OverlayError> {
         self.tun.write_packet(packet).await
-            .map_err(|e| OverlayError::TunError(e))?;
+            .map_err(OverlayError::TunError)?;
         Ok(())
     }
 

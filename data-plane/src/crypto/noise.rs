@@ -144,8 +144,8 @@ impl NoiseIKHandshake {
 
         // Update handshake hash: h = SHA-256(h || e.public)
         let mut hasher = Sha256::new();
-        hasher.update(&self.handshake_hash);
-        hasher.update(&ephemeral_public_bytes);
+        hasher.update(self.handshake_hash);
+        hasher.update(ephemeral_public_bytes);
         self.handshake_hash.copy_from_slice(&hasher.finalize());
 
         // es: DH(our_ephemeral, peer_static)
@@ -162,7 +162,7 @@ impl NoiseIKHandshake {
 
         // Update handshake hash: h = SHA-256(h || encrypted_s)
         hasher = Sha256::new();
-        hasher.update(&self.handshake_hash);
+        hasher.update(self.handshake_hash);
         hasher.update(&encrypted_s);
         self.handshake_hash.copy_from_slice(&hasher.finalize());
 
@@ -207,8 +207,8 @@ impl NoiseIKHandshake {
 
         // Update handshake hash: h = SHA-256(h || e.public)
         let mut hasher = Sha256::new();
-        hasher.update(&self.handshake_hash);
-        hasher.update(&resp_ephemeral_bytes);
+        hasher.update(self.handshake_hash);
+        hasher.update(resp_ephemeral_bytes);
         self.handshake_hash.copy_from_slice(&hasher.finalize());
 
         // ee: DH(our_ephemeral, responder_ephemeral) — provides forward secrecy
@@ -275,8 +275,8 @@ impl NoiseIKHandshake {
 
         // Update handshake hash: h = SHA-256(h || e.public)
         let mut hasher = Sha256::new();
-        hasher.update(&self.handshake_hash);
-        hasher.update(&init_ephemeral_bytes);
+        hasher.update(self.handshake_hash);
+        hasher.update(init_ephemeral_bytes);
         self.handshake_hash.copy_from_slice(&hasher.finalize());
 
         // es: DH(our_static, initiator_ephemeral)
@@ -291,7 +291,7 @@ impl NoiseIKHandshake {
 
         // Update handshake hash: h = SHA-256(h || encrypted_s)
         hasher = Sha256::new();
-        hasher.update(&self.handshake_hash);
+        hasher.update(self.handshake_hash);
         hasher.update(encrypted_s);
         self.handshake_hash.copy_from_slice(&hasher.finalize());
 
@@ -342,8 +342,8 @@ impl NoiseIKHandshake {
 
         // Update handshake hash: h = SHA-256(h || e.public)
         let mut hasher = Sha256::new();
-        hasher.update(&self.handshake_hash);
-        hasher.update(&resp_ephemeral_bytes);
+        hasher.update(self.handshake_hash);
+        hasher.update(resp_ephemeral_bytes);
         self.handshake_hash.copy_from_slice(&hasher.finalize());
 
         // ee: DH(our_ephemeral, initiator_ephemeral) — forward secrecy

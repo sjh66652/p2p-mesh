@@ -119,11 +119,7 @@ impl PeerConnectivity {
             self.srtt_us = rtt_us;
             self.rtt_var_us = rtt_us / 2;
         } else {
-            let delta = if rtt_us > self.srtt_us {
-                rtt_us - self.srtt_us
-            } else {
-                self.srtt_us - rtt_us
-            };
+            let delta = rtt_us.abs_diff(self.srtt_us);
             self.rtt_var_us = (3 * self.rtt_var_us + delta) / 4;
             self.srtt_us = (7 * self.srtt_us + rtt_us) / 8;
         }

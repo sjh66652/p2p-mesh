@@ -340,7 +340,7 @@ impl PathSelector {
         let jitter_ms = jitter_us as f64 / 1000.0;
         mos -= (jitter_ms / 50.0) * 0.3;
 
-        mos.max(1.0).min(5.0)
+        mos.clamp(1.0, 5.0)
     }
 
     /// Get the active path for a peer.

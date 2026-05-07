@@ -114,7 +114,7 @@ fn generate_self_signed_cert(
     let cert = cert_params.self_signed(&key_pair)?;
     let cert_der = CertificateDer::from(cert.der().to_vec());
     let key_der = PrivatePkcs8KeyDer::from(key_pair.serialize_der());
-    let key_der = PrivateKeyDer::Pkcs8(key_der.into());
+    let key_der = PrivateKeyDer::Pkcs8(key_der);
     Ok((cert_der, key_der))
 }
 

@@ -747,8 +747,7 @@ mod tests {
     fn test_pqc_negotiation() {
         let local = PqcCapabilities::default();
 
-        let mut remote = PqcCapabilities::default();
-        remote.min_security_level = 1; // Accept lower security
+        let remote = PqcCapabilities { min_security_level: 1, ..PqcCapabilities::default() };
 
         let result = negotiate_pqc(&local, &remote);
         assert!(result.is_some());
@@ -760,11 +759,9 @@ mod tests {
 
     #[test]
     fn test_pqc_negotiation_failure() {
-        let mut local = PqcCapabilities::default();
-        local.min_security_level = 5;
+        let local = PqcCapabilities { min_security_level: 5, ..PqcCapabilities::default() };
 
-        let mut remote = PqcCapabilities::default();
-        remote.kems = vec![PqcAlgorithm::MlKem512]; // Only level 1
+        let remote = PqcCapabilities { kems: vec![PqcAlgorithm::MlKem512], min_security_level: 1, ..PqcCapabilities::default() };
         remote.min_security_level = 1;
 
         let result = negotiate_pqc(&local, &remote);

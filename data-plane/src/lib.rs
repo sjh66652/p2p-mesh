@@ -31,7 +31,12 @@
 //!   ML path prediction, congestion forecasting, anomaly detection
 //!
 //! Phase 10 — Research-Grade Network System:
+//! Phase 10 — Research-Grade Network System:
 //!   DPDK, io_uring, QUIC multipath, Post-Quantum Crypto, Smart Relay
+
+// Crate-level lint configuration
+#![allow(dead_code)]
+#![allow(clippy::new_without_default)]
 
 // Core (Phase 1)
 pub mod crypto;

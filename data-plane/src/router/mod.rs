@@ -156,12 +156,12 @@ impl RouteTable {
                     Ok(c) => c,
                     Err(_) => continue,
                 };
-                if cidr.contains(&dst_ip) && route_list.iter().any(|r| r.active) {
-                    if cidr.prefix_len() > best_len {
-                        if let Some(route) = route_list.iter().find(|r| r.active) {
-                            best_len = cidr.prefix_len();
-                            best = Some(Arc::clone(route));
-                        }
+                if cidr.contains(&dst_ip) && route_list.iter().any(|r| r.active)
+                    && cidr.prefix_len() > best_len
+                {
+                    if let Some(route) = route_list.iter().find(|r| r.active) {
+                        best_len = cidr.prefix_len();
+                        best = Some(Arc::clone(route));
                     }
                 }
             }

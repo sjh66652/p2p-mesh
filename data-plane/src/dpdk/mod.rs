@@ -539,7 +539,7 @@ impl RssConfig {
                         self.hash_key[2], self.hash_key[3],
                     ]);
                 }
-                hash = hash << 1;
+                hash <<= 1;
             }
         }
         hash

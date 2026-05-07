@@ -139,7 +139,7 @@ impl MultiPathManager {
                 }
             }
         }
-        result.sort_by(|a, b| path_priority(&a.0).cmp(&path_priority(&b.0)));
+        result.sort_by_key(|a| path_priority(&a.0));
         result
     }
 

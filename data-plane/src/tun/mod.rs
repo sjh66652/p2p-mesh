@@ -87,7 +87,7 @@ impl TunInterface {
             })?;
 
         let name = device.name()
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("failed to get TUN device name: {}", e)))?;
+            .map_err(|e| io::Error::other(format!("failed to get TUN device name: {}", e)))?;
 
         // Set the interface up and assign the address
         #[cfg(target_os = "linux")]

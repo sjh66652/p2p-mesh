@@ -212,7 +212,7 @@ impl TurnServer {
         peer_addr: SocketAddr,
     ) -> Result<(), TurnError> {
         // Channel numbers must be in 0x4000-0x7FFF range
-        if channel_number < 0x4000 || channel_number > 0x7FFF {
+        if !(0x4000..=0x7FFF).contains(&channel_number) {
             return Err(TurnError::InvalidChannelNumber);
         }
 

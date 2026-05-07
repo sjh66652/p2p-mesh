@@ -214,6 +214,7 @@ pub enum PunchMessage {
 /// Execute the hole punching loop with HMAC authentication and DoS protection.
 ///
 /// Returns the established SocketAddr on success, or an error on timeout.
+#[allow(clippy::too_many_arguments)]
 pub async fn execute_punch(
     socket: Arc<UdpSocket>,
     hmac_key: &[u8],

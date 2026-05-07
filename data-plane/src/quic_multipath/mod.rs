@@ -755,7 +755,7 @@ mod tests {
 
     #[test]
     fn test_scheduler_lowest_rtt() {
-        let paths = vec![
+        let paths = [
             make_test_path(1, 50_000, 100_000_000),
             make_test_path(2, 10_000, 50_000_000),
             make_test_path(3, 100_000, 200_000_000),
@@ -769,7 +769,7 @@ mod tests {
 
     #[test]
     fn test_scheduler_round_robin() {
-        let paths = vec![
+        let paths = [
             make_test_path(1, 50_000, 100_000_000),
             make_test_path(2, 10_000, 50_000_000),
         ];

@@ -663,7 +663,7 @@ impl SmartRelayManager {
         let candidates: Vec<&SmartRelayNode> = relays
             .values()
             .filter(|r| {
-                let tier_ok = tier_hint.map_or(true, |t| r.tier == t);
+                let tier_ok = tier_hint.is_none_or(|t| r.tier == t);
                 let capacity_ok = r.capacity.max_bandwidth_bps.saturating_sub(r.load.bandwidth_bps)
                     >= required_bandwidth_bps;
                 let alive = r.last_seen.elapsed() < Duration::from_secs(30);
@@ -997,7 +997,7 @@ mod tests {
         // Feed increasing load
         for i in 0..20 {
             predictor.observe(RelayLoad {
-                bandwidth_bps: (100_000_000 + i * 5_000_000) as u64,
+                bandwidth_bps: 100_000_000 + i * 5_000_000,
                 connections: 1000 + i as u32 * 50,
                 pps: 100_000 + i * 5_000,
                 cpu_utilization: 0.2 + i as f64 * 0.01,

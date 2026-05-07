@@ -291,7 +291,7 @@ impl IceAgent {
     /// Pairs are formed for all compatible combinations:
     /// - Same IP version (IPv4 ↔ IPv4, IPv6 ↔ IPv6)
     /// - Same component ID
-    /// Pairs are ordered by priority descending.
+    ///   Pairs are ordered by priority descending.
     async fn form_candidate_pairs(&self) {
         let local = self.local_candidates.read().await;
         let remote = self.remote_candidates.read().await;
@@ -505,7 +505,7 @@ impl IceAgent {
 
         // Verify STUN magic cookie
         let magic = &data[4..8];
-        if magic != &[0x21, 0x12, 0xA4, 0x42] {
+        if magic != [0x21, 0x12, 0xA4, 0x42] {
             return None;
         }
 

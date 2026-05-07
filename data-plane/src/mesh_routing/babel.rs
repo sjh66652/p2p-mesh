@@ -219,7 +219,7 @@ impl BabelProtocol {
 
         // Update RX cost based on received Hello frequency
         let expected_hellos = neighbor.hello_interval.as_secs() as u16;
-        neighbor.rxcost = (65535 / expected_hellos.max(1)).min(65535);
+        neighbor.rxcost = 65535 / expected_hellos.max(1);
     }
 
     /// Process an IHU message (bidirectional confirmation).

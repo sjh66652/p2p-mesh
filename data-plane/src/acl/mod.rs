@@ -40,13 +40,8 @@ pub enum PolicyMode {
     /// Allow all traffic by default, deny only what rules specify
     DefaultAllow,
     /// Deny all traffic by default, allow only what rules specify
+    #[default]
     DefaultDeny,
-}
-
-impl Default for PolicyMode {
-    fn default() -> Self {
-        PolicyMode::DefaultDeny
-    }
 }
 
 /// A single ACL rule.

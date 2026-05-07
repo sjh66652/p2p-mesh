@@ -205,7 +205,8 @@ pub extern "C" fn mobile_mesh_init(
     let auth_token = unsafe { CStr::from_ptr(auth_token) }.to_string_lossy().into_owned();
     let platform = match platform {
         0 => MobilePlatform::Android,
-        1 | _ => MobilePlatform::Ios,
+        1 => MobilePlatform::Android,
+        _ => MobilePlatform::Ios,
     };
 
     let config = MobileConfig {
