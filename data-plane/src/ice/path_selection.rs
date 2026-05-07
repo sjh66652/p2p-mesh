@@ -8,8 +8,7 @@
 //! - Network interface awareness
 
 use std::collections::HashMap;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
-use std::sync::Arc;
+use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 
 use tokio::sync::RwLock;

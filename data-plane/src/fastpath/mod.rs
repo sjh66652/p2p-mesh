@@ -16,9 +16,8 @@
 
 use std::collections::VecDeque;
 use std::net::SocketAddr;
-use std::pin::Pin;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use tokio::sync::{mpsc, Mutex, RwLock};
 

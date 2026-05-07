@@ -14,7 +14,6 @@
 //! - Reclamation of stale IPs after device deregistration
 
 use std::net::Ipv4Addr;
-use std::sync::Arc;
 
 use ipnet::Ipv4Net;
 use serde::{Deserialize, Serialize};
@@ -87,8 +86,9 @@ impl IpamManager {
             .map_err(|e| IpamError::ApiError(format!("HTTP request failed: {}", e)))?;
 
         if !resp.status().is_success() {
+            let status = resp.status();
             let body = resp.text().await.unwrap_or_default();
-            return Err(IpamError::ApiError(format!("IP allocation failed ({}): {}", resp.status(), body)));
+            return Err(IpamError::ApiError(format!("IP allocation failed ({}): {}", status, body)));
         }
 
         let json: serde_json::Value = resp.json().await

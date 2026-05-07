@@ -11,9 +11,7 @@
 //! - Route hold-down for stability
 //! - Hop count limit (16 = infinity, like RIP)
 
-use std::collections::{HashMap, HashSet};
-use std::net::Ipv4Addr;
-use std::sync::Arc;
+use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 use ipnet::Ipv4Net;
@@ -107,10 +105,11 @@ impl DistanceVector {
     /// Add a directly connected route.
     pub async fn add_connected_route(&self, cidr: Ipv4Net, metric: u32) {
         let mut table = self.table.write().await;
+        let node_id = table.node_id.clone();
         table.routes.insert(cidr, DvRoute {
             cidr,
             metric,
-            next_hop: table.node_id.clone(),
+            next_hop: node_id,
             last_updated: Instant::now(),
             hold_down: false,
             hold_down_until: None,
@@ -161,7 +160,7 @@ impl DistanceVector {
             let new_metric = peer_metric.saturating_add(hop_cost);
 
             // Don't accept routes with infinite metric
-            if peer_metric >= INFINITY {
+            if *peer_metric >= INFINITY {
                 // Poison reverse: if this route was via this peer, mark it poisoned
                 if let Some(my_route) = table.routes.get_mut(cidr) {
                     if my_route.next_hop == from_peer && !my_route.flags.connected {

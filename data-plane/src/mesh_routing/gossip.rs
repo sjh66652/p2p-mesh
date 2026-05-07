@@ -11,9 +11,8 @@
 //! - If ping fails, asks other peers to check (indirect ping)
 //! - Suspect/dead state transitions with configurable thresholds
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use rand::Rng;
@@ -30,7 +29,7 @@ const DEFAULT_FANOUT: usize = 3;
 const DEFAULT_GOSSIP_INTERVAL: Duration = Duration::from_secs(1);
 
 /// Member states in SWIM protocol.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum MemberState {
     Alive,
     Suspect,

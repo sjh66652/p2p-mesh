@@ -10,7 +10,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use quinn::{Connection, Endpoint, RecvStream, SendStream, ServerConfig, TransportConfig};
+use quinn::{Connection, Endpoint, RecvStream, ServerConfig, TransportConfig};
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
 use sha2::{Digest, Sha256};
 
@@ -143,6 +143,7 @@ fn configure_server(
 /// This prevents MITM attacks by rejecting any certificate whose fingerprint doesn't match
 /// the expected value. The fingerprint should be exchanged out-of-band (e.g., via the
 /// control plane's signaling service).
+#[derive(Debug)]
 struct CertificatePinner {
     expected_fingerprint: String,
 }

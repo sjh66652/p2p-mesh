@@ -17,13 +17,10 @@
 //! Kernel: Linux 5.1+ (5.6+ for full feature set)
 
 use std::collections::VecDeque;
-use std::net::{SocketAddr, TcpListener, UdpSocket};
-use std::os::fd::{AsRawFd, RawFd};
+use std::net::SocketAddr;
+use std::os::fd::RawFd;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::Arc;
 use std::time::{Duration, Instant};
-
-use serde::{Deserialize, Serialize};
 
 // =====================================================================
 // Submission Queue Entry (SQE) — Operations to submit

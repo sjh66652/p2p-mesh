@@ -25,7 +25,6 @@ use hmac::{Hmac, Mac};
 use rand::RngCore;
 use sha2::Sha256;
 use tokio::net::UdpSocket;
-use tokio::sync::Mutex;
 
 /// Maximum number of peer candidates to accept (prevents memory exhaustion).
 pub const MAX_PEER_CANDIDATES: usize = 10;

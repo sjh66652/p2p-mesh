@@ -11,12 +11,9 @@
 //! Uses the `tun` crate which wraps OS-specific TUN/TAP ioctls.
 
 use std::io::{self, Read, Write};
-use std::net::Ipv4Addr;
-use std::sync::Arc;
-use std::task::{Context, Poll};
 
-use tokio::io::{unix::AsyncFd, Interest};
-use tokio::sync::mpsc;
+use tokio::io::unix::AsyncFd;
+use tun::Device;
 
 /// Represents a TUN virtual network interface.
 ///
@@ -25,7 +22,7 @@ pub struct TunInterface {
     /// TUN device name (e.g., "mesh0")
     name: String,
     /// Async wrapper for tokio integration
-    async_fd: AsyncFd<tun::Device>,
+    async_fd: AsyncFd<dyn tun::Device>,
 }
 
 impl TunInterface {
@@ -53,17 +50,11 @@ impl TunInterface {
                 let mut config = tun::Configuration::default();
                 config
                     .name(&dev_name)
-                    .tap(false) // TUN (L3) mode, not TAP (L2)
                     .packet_info(false)
                     .mtu(mtu as i32)
                     .address(address)
                     .netmask(netmask)
                     .up();
-
-                #[cfg(target_os = "linux")]
-                config.platform(|cfg| {
-                    cfg.require_root(false);
-                });
 
                 match tun::create(&config) {
                     Ok(dev) => {

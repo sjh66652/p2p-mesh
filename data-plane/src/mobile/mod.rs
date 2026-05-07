@@ -19,7 +19,7 @@
 //!   - Background keepalive (OS restrictions)
 //!   - Memory constraints (< 50MB heap target)
 
-use std::ffi::{CStr, CString};
+use std::ffi::CStr;
 use std::os::raw::c_char;
 
 /// Mobile platform type.

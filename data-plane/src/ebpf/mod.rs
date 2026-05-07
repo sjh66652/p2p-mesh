@@ -18,7 +18,6 @@
 
 use std::collections::HashMap;
 use std::net::Ipv4Addr;
-use std::sync::Arc;
 
 use tokio::sync::RwLock;
 

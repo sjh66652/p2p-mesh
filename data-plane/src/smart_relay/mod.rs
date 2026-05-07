@@ -20,10 +20,9 @@
 //!   Global:    Cross-region transit, high bandwidth (3-5 per continent)
 //!   Core:      Inter-continental backbone, highest capacity (5-10 globally)
 
-use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
@@ -118,7 +117,7 @@ impl GeoLocation {
 // =====================================================================
 
 /// A single relay node in the smart relay network.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SmartRelayNode {
     /// Unique relay identifier
     pub id: String,

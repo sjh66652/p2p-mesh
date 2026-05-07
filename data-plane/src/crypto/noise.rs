@@ -25,9 +25,9 @@ use chacha20poly1305::{
     ChaCha20Poly1305, Key, Nonce,
 };
 use rand::RngCore;
-use sha2::{Digest, Sha256, Sha512};
-use x25519_dalek::{EphemeralSecret, PublicKey, StaticSecret};
-use zeroize::{Zeroize, ZeroizeOnDrop};
+use sha2::{Digest, Sha256};
+use x25519_dalek::{EphemeralSecret, PublicKey};
+use zeroize::ZeroizeOnDrop;
 
 /// Noise handshake state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -65,21 +65,21 @@ pub struct NoiseIKHandshake {
 
 /// Noise static keypair.
 pub struct NoiseStaticKeypair {
-    secret: StaticSecret,
+    secret: EphemeralSecret,
     public: PublicKey,
 }
 
 impl NoiseStaticKeypair {
     /// Generate a new static X25519 keypair.
     pub fn generate() -> Self {
-        let secret = StaticSecret::random_from_rng(rand::thread_rng());
+        let secret = EphemeralSecret::random();
         let public = PublicKey::from(&secret);
         Self { secret, public }
     }
 
     /// Create from existing 32-byte secret key.
     pub fn from_secret(secret_bytes: &[u8; 32]) -> Self {
-        let secret = StaticSecret::from(*secret_bytes);
+        let secret = EphemeralSecret::from(*secret_bytes);
         let public = PublicKey::from(&secret);
         Self { secret, public }
     }
@@ -91,7 +91,7 @@ impl NoiseStaticKeypair {
 
     /// Get the 32-byte secret key.
     pub fn secret_key_bytes(&self) -> [u8; 32] {
-        self.secret.to_bytes()
+        *self.secret.as_ref()
     }
 }
 
@@ -442,7 +442,7 @@ fn mix_key(ck: &mut [u8; 32], input: &[u8]) {
     use hmac::{Hmac, Mac};
     type HmacSha256 = Hmac<Sha256>;
 
-    let mut mac = HmacSha256::new_from_slice(ck)
+    let mut mac = <HmacSha256 as hmac::Mac>::new_from_slice(ck)
         .expect("HMAC key should be valid");
     mac.update(input);
     ck.copy_from_slice(&mac.finalize().into_bytes());
@@ -457,13 +457,13 @@ fn split(ck: &[u8; 32]) -> ([u8; 32], [u8; 32]) {
     let mut k2 = [0u8; 32];
 
     // temp = HMAC-SHA256(ck, 0x01)
-    let mut mac = HmacSha256::new_from_slice(ck)
+    let mut mac = <HmacSha256 as hmac::Mac>::new_from_slice(ck)
         .expect("HMAC key should be valid");
     mac.update(&[0x01]);
     k1.copy_from_slice(&mac.finalize().into_bytes());
 
     // out2 = HMAC-SHA256(ck, temp || 0x02)
-    let mut mac = HmacSha256::new_from_slice(ck)
+    let mut mac = <HmacSha256 as hmac::Mac>::new_from_slice(ck)
         .expect("HMAC key should be valid");
     mac.update(&k1);
     mac.update(&[0x02]);

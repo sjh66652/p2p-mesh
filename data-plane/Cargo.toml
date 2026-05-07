@@ -12,7 +12,7 @@ tokio = { version = "1", features = ["full"] }
 tun = "0.6"
 
 # IP network types (CIDR, IpNet)
-ipnet = "2"
+ipnet = { version = "2", features = ["serde"] }
 
 # DNS protocol
 trust-dns-proto = "0.23"
@@ -74,6 +74,9 @@ chrono = "0.4"
 quinn = "0.11"
 rustls = { version = "0.23", features = ["ring"] }
 rcgen = { version = "0.13" }
+
+# Fast random number generation (small, no_std compatible)
+fastrand = "2"
 
 # Additional utilities
 thiserror = "2.0"

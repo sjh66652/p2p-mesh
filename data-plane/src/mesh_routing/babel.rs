@@ -11,11 +11,11 @@
 //! This implementation targets Babel-Z (RFC 8966) with extensions
 //! for P2P mesh: relay election and multi-path.
 
-use std::collections::{HashMap, HashSet, VecDeque};
-use std::net::{Ipv4Addr, SocketAddr};
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 
+use ipnet::Ipv4Net;
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 

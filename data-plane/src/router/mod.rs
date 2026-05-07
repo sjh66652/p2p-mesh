@@ -11,9 +11,9 @@
 //! Used by the Overlay module to decide which peer to forward packets to.
 
 use std::collections::{BTreeMap, HashMap};
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::net::Ipv4Addr;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use ipnet::Ipv4Net;
 use serde::{Deserialize, Serialize};
@@ -35,8 +35,10 @@ pub struct Route {
     /// Whether this route is currently active
     pub active: bool,
     /// When this route was added
+    #[serde(skip)]
     pub added_at: Instant,
     /// Last time this route was used
+    #[serde(skip)]
     pub last_used: Option<Instant>,
 }
 
@@ -204,6 +206,7 @@ impl RouteTable {
         for entry in routes.values_mut() {
             for route in entry.iter_mut() {
                 if route.peer_id == peer_id {
+                    let route = Arc::make_mut(route);
                     route.active = false;
                 }
             }
@@ -216,6 +219,7 @@ impl RouteTable {
         for entry in routes.values_mut() {
             for route in entry.iter_mut() {
                 if route.peer_id == peer_id {
+                    let route = Arc::make_mut(route);
                     route.active = true;
                 }
             }
@@ -229,6 +233,7 @@ impl RouteTable {
         if let Some(entry) = routes.get_mut(&cidr_key) {
             for route in entry.iter_mut() {
                 if route.peer_id == peer_id {
+                    let route = Arc::make_mut(route);
                     route.metric = new_metric;
                 }
             }

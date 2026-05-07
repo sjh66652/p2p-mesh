@@ -238,15 +238,28 @@ impl ConnectivityManager {
         socket: &Arc<UdpSocket>,
     ) -> Vec<String> {
         let mut dead_peers = Vec::new();
-        let peers = self.peers.read().await;
+        let mut peer_ids_to_check: Vec<String> = {
+            let peers = self.peers.read().await;
+            peers.keys().cloned().collect()
+        };
 
-        for (peer_id, peer_state) in peers.iter() {
+        for peer_id in &peer_ids_to_check {
             let binding = self.build_binding_request();
 
-            // Send binding request
-            match socket.send_to(&binding, peer_state.remote_addr).await {
+            // Snapshot the remote address under the read lock, then drop it
+            let remote_addr: Option<SocketAddr> = {
+                let peers = self.peers.read().await;
+                peers.get(peer_id).map(|p| p.remote_addr)
+            };
+
+            let remote_addr = match remote_addr {
+                Some(addr) => addr,
+                None => continue,
+            };
+
+            // Send binding request (no lock held)
+            match socket.send_to(&binding, remote_addr).await {
                 Ok(_) => {
-                    drop(peers);
                     let mut peers = self.peers.write().await;
                     if let Some(peer) = peers.get_mut(peer_id) {
                         peer.probes_sent += 1;
@@ -276,7 +289,6 @@ impl ConnectivityManager {
                     }
                 }
                 Err(e) => {
-                    drop(peers);
                     let mut peers = self.peers.write().await;
                     if let Some(peer) = peers.get_mut(peer_id) {
                         peer.record_failure();

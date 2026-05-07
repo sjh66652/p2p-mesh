@@ -21,12 +21,8 @@
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use hmac::{Hmac, Mac};
-use sha2::Sha256;
-use tokio::net::UdpSocket;
 use tokio::sync::RwLock;
 
 /// TURN allocation lifetime (RFC 8656 default: 600 seconds).

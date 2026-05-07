@@ -14,8 +14,7 @@
 //! - Bayesian changepoint detection for anomaly detection
 
 use std::collections::{HashMap, VecDeque};
-use std::net::SocketAddr;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;

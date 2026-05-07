@@ -18,14 +18,11 @@
 //! - Destination IP is at offset 16 in the IPv4 header
 
 use std::collections::HashMap;
-use std::net::{Ipv4Addr, SocketAddr};
-use std::sync::Arc;
+use std::net::Ipv4Addr;
 
 use ipnet::Ipv4Net;
-use tokio::sync::{mpsc, Mutex, RwLock};
+use tokio::sync::{Mutex, RwLock};
 use tokio::task::JoinHandle;
-
-use crate::crypto::SessionKey;
 use crate::router::{Route, RouteTable, RouteType};
 use crate::tunnel::TunnelManager;
 
@@ -235,7 +232,6 @@ pub enum OverlayError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::str::FromStr;
 
     #[test]
     fn test_extract_dst_ip_valid() {

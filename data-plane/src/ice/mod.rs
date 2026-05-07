@@ -15,14 +15,14 @@
 pub mod connectivity;
 pub mod path_selection;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::RwLock;
 
 /// ICE candidate types (per RFC 8445).
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]

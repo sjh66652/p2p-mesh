@@ -100,7 +100,8 @@ impl TunnelManager {
             .ok_or_else(|| format!("No tunnel to device {}", device_id))?;
 
         let mut tunnel = tunnel_arc.lock().await;
-        let encrypted = tunnel.encapsulate(data);
+        let encrypted = tunnel.encapsulate(data)
+            .ok_or_else(|| format!("Encryption failed for device {}", device_id))?;
         let addr = tunnel.peer_addr;
 
         self.socket
@@ -256,7 +257,7 @@ pub async fn establish_p2p_connection(
 
     let punch_result = puncher::execute_punch(
         socket.clone(),
-        hmac_key,
+        &hmac_key,
         peer_id,
         our_device_id,
         &our_candidates,

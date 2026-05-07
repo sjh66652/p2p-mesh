@@ -9,8 +9,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::net::SocketAddr;
-use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
@@ -117,11 +116,12 @@ impl TopologyManager {
 
     /// Add or update a node.
     pub async fn upsert_node(&self, node: TopologyNode) {
+        let device_id = node.device_id.clone();
         let mut nodes = self.nodes.write().await;
-        nodes.insert(node.device_id.clone(), node);
+        nodes.insert(device_id.clone(), node);
 
         let mut adj = self.adjacency.write().await;
-        adj.entry(node.device_id.clone()).or_default();
+        adj.entry(device_id).or_default();
 
         let mut ver = self.version.write().await;
         *ver += 1;
