@@ -32,9 +32,9 @@ fn warn_plaintext_http(url: &str, label: &str) {
 }
 
 // Project modules
-use p2p_mesh_dataplane::crypto::{self, SessionKey};
+use p2p_mesh_dataplane::crypto::SessionKey;
 use p2p_mesh_dataplane::metrics::PathMetrics;
-use p2p_mesh_dataplane::multipath::{MultiPathManager, PathType};
+use p2p_mesh_dataplane::multipath::MultiPathManager;
 use p2p_mesh_dataplane::puncher;
 use p2p_mesh_dataplane::stun;
 use p2p_mesh_dataplane::tunnel::TunnelManager;
@@ -65,6 +65,7 @@ struct Args {
 }
 
 /// Active peer connection state.
+#[allow(dead_code)]
 struct PeerConnection {
     /// Peer's device ID
     device_id: String,
@@ -108,7 +109,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // ---- Step 3: Build candidates ----
     let mut candidates = Vec::new();
-    if let Some(local) = socket.local_addr().ok() {
+    if let Ok(local) = socket.local_addr() {
         candidates.push(puncher::Candidate {
             addr: local,
             candidate_type: "host".to_string(),
@@ -209,9 +210,9 @@ async fn handle_punch_message(
     msg: &puncher::PunchMessage,
     src_addr: SocketAddr,
     socket: Arc<UdpSocket>,
-    multi_path: &Arc<MultiPathManager>,
-    peers: &Arc<Mutex<HashMap<String, PeerConnection>>>,
-    tunnel_manager: &Arc<Mutex<TunnelManager>>,
+    _multi_path: &Arc<MultiPathManager>,
+    _peers: &Arc<Mutex<HashMap<String, PeerConnection>>>,
+    _tunnel_manager: &Arc<Mutex<TunnelManager>>,
 ) {
     match msg {
         puncher::PunchMessage::Hello { nonce } => {
