@@ -1,0 +1,105 @@
+{
+  "latency": {
+    "LAN": {
+      "avg_ms": 0.51,
+      "min_ms": 0.4,
+      "max_ms": 0.6,
+      "loss_pct": 0.0,
+      "quality": 0.9995,
+      "samples": 200
+    },
+    "WAN": {
+      "avg_ms": 31.1,
+      "min_ms": 25.08,
+      "max_ms": 34.86,
+      "loss_pct": 0.0,
+      "quality": 0.9689,
+      "samples": 200
+    },
+    "Satellite": {
+      "avg_ms": 248.52,
+      "min_ms": 230.04,
+      "max_ms": 268.82,
+      "loss_pct": 1.5,
+      "quality": 0.747,
+      "samples": 197
+    }
+  },
+  "relay_pps": {
+    "by_config": {
+      "1-dev@1400B": {
+        "devs": 1,
+        "payload": 1400,
+        "pps": 100,
+        "mbps": 1.17
+      },
+      "10-dev@1400B": {
+        "devs": 10,
+        "payload": 1400,
+        "pps": 500,
+        "mbps": 5.86
+      },
+      "100-dev@64B": {
+        "devs": 100,
+        "payload": 64,
+        "pps": 500,
+        "mbps": 0.51
+      },
+      "100-dev@1400B": {
+        "devs": 100,
+        "payload": 1400,
+        "pps": 500,
+        "mbps": 5.86
+      }
+    },
+    "overall": {
+      "max_pps": 111111,
+      "bottleneck": "IP 500 PPS",
+      "overhead_pct": 4.4
+    }
+  },
+  "hole_punch": {
+    "stats": {
+      "total": 36,
+      "possible_pct": 80.6,
+      "avg_1c": 0.6879,
+      "avg_3c": 0.7472,
+      "bonus_pct": 8.6
+    }
+  },
+  "nat_coverage": {
+    "accuracy_pct": 100.0
+  },
+  "reconnect": {
+    "warm_ms": 160,
+    "cold_ms": 1010,
+    "relay_ms": 5.0,
+    "wavg_ms": 357.0,
+    "worst_ms": 13000
+  },
+  "multipath": {
+    "2p WiFi+LTE": {
+      "single_mbps": 50.0,
+      "theoretical_mbps": 75.0,
+      "agg_mbps": 71.25,
+      "gain_x": 1.43
+    },
+    "3p WiFi+LTE+5G": {
+      "single_mbps": 100.0,
+      "theoretical_mbps": 175.0,
+      "agg_mbps": 157.5,
+      "gain_x": 1.57
+    },
+    "4p multiWAN": {
+      "single_mbps": 100.0,
+      "theoretical_mbps": 260.0,
+      "agg_mbps": 221.0,
+      "gain_x": 2.21
+    }
+  },
+  "quic_migration": {
+    "success_pct": 75.0,
+    "avg_disruption_ms": 6.0,
+    "max_paths": 8
+  }
+}
