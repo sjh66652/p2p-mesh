@@ -19,6 +19,8 @@ use ipnet::Ipv4Net;
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 
+use crate::http_gateway::{AuthProvider, HttpGateway, HttpGatewayConfig};
+
 /// The overlay network prefix (RFC 6598 CGNAT space, borrowed with modifications).
 /// We use 100.64.0.0/10 similar to Tailscale and ZeroTier for overlay addressing.
 pub const OVERLAY_PREFIX: &str = "100.64.0.0";
@@ -41,17 +43,26 @@ pub struct IpamState {
 pub struct IpamManager {
     /// IPAM state
     state: RwLock<IpamState>,
-    /// Control plane API endpoint
-    api_base_url: String,
-    /// Auth token for API calls
-    auth_token: String,
-    /// HTTP client
-    http_client: reqwest::Client,
+    /// HTTP gateway for control plane API calls
+    gateway: HttpGateway,
 }
 
 impl IpamManager {
     /// Create a new IPAM manager.
+    ///
+    /// Constructs an internal `HttpGateway` from the given API URL and auth token.
+    /// Returns an error if the gateway configuration is invalid.
     pub fn new(api_base_url: String, auth_token: String) -> Self {
+        // HttpGateway::new should not fail for valid URLs — the only failure case is
+        // certificate pinning misconfiguration, which we don't use here.
+        let gateway = HttpGateway::new(HttpGatewayConfig {
+            base_url: api_base_url,
+            auth: AuthProvider::jwt(auth_token),
+            max_retries: 2,
+            ..Default::default()
+        })
+        .expect("HttpGateway creation should not fail without certificate pinning");
+
         Self {
             state: RwLock::new(IpamState {
                 our_ip: None,
@@ -59,9 +70,7 @@ impl IpamManager {
                 ip_to_peer: std::collections::HashMap::new(),
                 pending_ips: std::collections::HashSet::new(),
             }),
-            api_base_url,
-            auth_token,
-            http_client: reqwest::Client::new(),
+            gateway,
         }
     }
 
@@ -71,31 +80,17 @@ impl IpamManager {
     /// Body: { "device_id": "..." }
     /// Response: { "virtual_ip": "100.64.0.1" }
     pub async fn request_ip(&self, device_id: &str) -> Result<Ipv4Addr, IpamError> {
-        let url = format!("{}/api/v1/network/ipam/allocate", self.api_base_url);
-
         let request_body = serde_json::json!({
             "device_id": device_id,
         });
 
-        let resp = self.http_client
-            .post(&url)
-            .header("Authorization", format!("Bearer {}", self.auth_token))
-            .json(&request_body)
-            .send()
+        let json: serde_json::Value = self.gateway
+            .post("/api/v1/network/ipam/allocate", &request_body)
             .await
-            .map_err(|e| IpamError::ApiError(format!("HTTP request failed: {}", e)))?;
-
-        if !resp.status().is_success() {
-            let status = resp.status();
-            let body = resp.text().await.unwrap_or_default();
-            return Err(IpamError::ApiError(format!("IP allocation failed ({}): {}", status, body)));
-        }
-
-        let json: serde_json::Value = resp.json().await
-            .map_err(|e| IpamError::ApiError(format!("JSON parse failed: {}", e)))?;
+            .map_err(|e| IpamError::ApiError(e.to_string()))?;
 
         let ip_str = json["virtual_ip"].as_str()
-            .ok_or(IpamError::ApiError("No virtual_ip in response".into()))?;
+            .ok_or_else(|| IpamError::ApiError("No virtual_ip in response".into()))?;
 
         let ip: Ipv4Addr = ip_str.parse()
             .map_err(|e| IpamError::ApiError(format!("Invalid IP in response: {}", e)))?;
@@ -111,23 +106,24 @@ impl IpamManager {
 
     /// Release our virtual IP (on shutdown).
     pub async fn release_ip(&self, device_id: &str) -> Result<(), IpamError> {
-        let url = format!("{}/api/v1/network/ipam/release", self.api_base_url);
+        let payload = serde_json::json!({ "device_id": device_id });
 
-        let resp = self.http_client
-            .post(&url)
-            .header("Authorization", format!("Bearer {}", self.auth_token))
-            .json(&serde_json::json!({ "device_id": device_id }))
-            .send()
+        match self.gateway
+            .post::<_, serde_json::Value>("/api/v1/network/ipam/release", &payload)
             .await
-            .map_err(|e| IpamError::ApiError(format!("Release failed: {}", e)))?;
-
-        if resp.status().is_success() {
-            let mut state = self.state.write().await;
-            state.our_ip = None;
-            log::info!("Released overlay IP for device {}", device_id);
+        {
+            Ok(_) => {
+                let mut state = self.state.write().await;
+                state.our_ip = None;
+                log::info!("Released overlay IP for device {}", device_id);
+                Ok(())
+            }
+            Err(e) => {
+                // Release failures are non-fatal — log and continue
+                log::warn!("IP release request failed (non-fatal): {}", e);
+                Ok(())
+            }
         }
-
-        Ok(())
     }
 
     /// Resolve a peer ID to its virtual IP from cache.

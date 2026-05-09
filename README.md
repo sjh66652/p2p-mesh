@@ -537,39 +537,106 @@ python3 benchmark.py
 
 ---
 
+## 💻 Sandbox & Offline Development
+
+项目支持在受限环境中开发和验证（无 root、无 Docker、无 PostgreSQL）。
+
+### SOCKS5 代理配置
+
+沙箱环境的 HTTPS 出站连接可能受限制（AWS CloudFront CDN TLS 兼容性问题），通过 SOCKS5 代理绕过：
+
+```bash
+# ~/.curlrc
+--socks5 host.docker.internal:7897
+--noproxy localhost,127.0.0.1,*.local
+--connect-timeout 10
+--max-time 120
+```
+
+或在 Docker daemon 中使用：
+
+```bash
+dockerd --https-proxy socks5://host.docker.internal:7897 \
+        --http-proxy socks5://host.docker.internal:7897
+```
+
+### 本地编译（无需 Docker）
+
+```bash
+# 1. 安装 Rust 1.88+
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+rustup default stable
+
+# 2. 编译全部 4 个数据面二进制
+cd data-plane
+cargo build --bin mesh-stun    # STUN 服务器 (94MB debug)
+cargo build --bin mesh-relay   # 中继节点  (109MB)
+cargo build --bin mesh-tunnel  # P2P 客户端 (107MB)
+cargo build --bin mesh-overlay # Overlay 管理 (109MB)
+
+# 3. 运行测试
+cargo test
+# 结果: 1 passed; 9 ignored (DPDK/eBPF/io_uring — 需要硬件支持)
+
+# 4. 安装 Python 控制面依赖
+cd ../control-plane
+pip install --break-system-packages fastapi uvicorn "sqlalchemy>=2.0" aiosqlite \
+    pydantic pydantic-settings python-jose email-validator
+
+# 5. 启动控制面（SQLite 模式，开发用）
+DATABASE_URL="sqlite+aiosqlite:///./p2p_mesh.db" \
+  uvicorn app.main:app --host 0.0.0.0 --port 8000
+
+# 6. 验证
+curl http://127.0.0.1:8000/health
+# → {"status":"healthy","version":"2.0.0","mode":"sandbox"}
+```
+
+### 沙箱运行容器（无 cgroup）
+
+```bash
+# 下载 rootfs
+curl -O https://dl-cdn.alpinelinux.org/alpine/v3.21/releases/x86_64/alpine-minirootfs-3.21.3-x86_64.tar.gz
+
+# 直接运行（无需 Docker daemon）
+runc-ctr alpine-minirootfs-3.21.3-x86_64.tar.gz "echo hello"
+```
+
+### 编译环境验证
+
+| 环境 | Rust | 数据面 | 控制面 | STUN 测试 |
+|------|:----:|:------:|:------:|:---------:|
+| Ubuntu 22.04 沙箱 | 1.95.0 | ✅ 4/4 | ✅ API 启动 | ✅ ping/pong |
+| Docker (production) | - | ✅ | ✅ | ✅ |
+
+---
+
 ## 推送到 GitHub
 
 ```bash
-# 1. 查看当前变更
 cd p2p-mesh
-git status
 
-# 2. 添加所有新文件
-git add deploy.sh dashboard/ scripts/deploy-client.ps1 \
-        scripts/deploy-client.sh scripts/deploy-server.sh \
-        deployment/Dockerfile.tunnel README.md
+# 1. 查看当前所有变更
+git status
+git diff --stat
+
+# 2. 添加所有变更（包括新文件和修改）
+git add -A
 
 # 3. 提交
-git commit -m "feat: add one-click deployment scripts and visual dashboard
+git commit -m "chore: sandbox deployment verification + SOCKS5 proxy + runc-ctr support
 
-- deploy.sh: master orchestrator with interactive menu
-- scripts/deploy-server.sh: server one-click deployment (Docker + SSL + firewall + health)
-- scripts/deploy-client.sh: Linux client deployment (Rust + systemd)
-- scripts/deploy-client.ps1: Windows client deployment (PowerShell)
-- deployment/Dockerfile.tunnel: containerized client build
-- dashboard/index.html: single-file monitoring dashboard (Mermaid + Chart.js)
-- README.md: updated with deployment instructions"
+- README.md: add sandbox/offline dev section, SOCKS5 proxy config, runc-ctr usage
+- CLAUDE.md: update with proxy and sandbox deployment notes
+- sandbox verification: 4 Rust binaries compiled (1.95.0), STUN tested, API serves
+- benchmark_results.json: updated benchmark results (2026-05-09)"
 
-# 4. 推送到 GitHub
+# 4. 推送
 git push origin main
-
-# 如果使用 Personal Access Token 认证:
-# git remote set-url origin https://<token>@github.com/sjh66652/p2p-mesh.git
-# git push origin main
 ```
 
 > **认证说明:** GitHub 已不再支持密码认证。推送时需使用 Personal Access Token (PAT) 或 SSH Key。
-> - **PAT:** Settings → Developer settings → Personal access tokens → Generate (勾选 `repo` 权限)
+> - **PAT:** Settings → Developer settings → Personal access tokens → Generate（勾选 `repo` 权限），然后用 `git remote set-url origin https://<token>@github.com/sjh66652/p2p-mesh.git`
 > - **SSH:** `git remote set-url origin git@github.com:sjh66652/p2p-mesh.git`
 
 ---

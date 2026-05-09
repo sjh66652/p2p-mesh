@@ -247,7 +247,7 @@ def run_all():
     all_r["reconnect"] = test_reconnect()
     all_r["multipath"] = test_multipath()
     all_r["quic_migration"] = test_quic()
-    out = "/sessions/busy-wonderful-sagan/mnt/outputs/benchmark_results.json"
+    out = os.path.join(os.path.dirname(os.path.abspath(__file__)), "benchmark_results.json")
     with open(out, "w") as f:
         json.dump(all_r, f, indent=2, default=str)
 
@@ -296,4 +296,6 @@ def run_all():
     return all_r
 
 if __name__ == "__main__":
+    run_all()
+    run_all()
     run_all()

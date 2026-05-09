@@ -1,24 +1,17 @@
 # ╔══════════════════════════════════════════════════════════════════╗
-# ║       P2P Mesh Network — 客户端一键部署脚本 (Windows)           ║
-# ║       Client One-Click Deployment Script (PowerShell)           ║
+# ║       P2P Mesh Network - Client One-Click Deploy (Windows)       ║
+# ║       PowerShell Script                                          ║
 # ╚══════════════════════════════════════════════════════════════════╝
 #
-# 功能:
-#   1. 检测系统环境 (Windows 10+/Server 2019+)
-#   2. 安装 Rust 工具链 (如未安装)
-#   3. 编译 mesh-tunnel 客户端
-#   4. 交互式配置客户端
-#   5. 安装为 Windows 服务 (开机自启)
-#
-# 用法 (以管理员身份运行 PowerShell):
+# Usage (Run as Administrator in PowerShell):
 #   .\scripts\deploy-client.ps1
 #   .\scripts\deploy-client.ps1 -Server "https://mesh.yourdomain.com" -Token "<auth_token>"
 #   .\scripts\deploy-client.ps1 -Uninstall
 #
-# 要求:
-#   - Windows 10 (1809+) 或 Windows Server 2019+
-#   - PowerShell 5.1+ (以管理员身份运行)
-#   - Visual Studio Build Tools (或单独安装)
+# Requirements:
+#   - Windows 10 (1809+) or Windows Server 2019+
+#   - PowerShell 5.1+ (run as Administrator)
+#   - Visual Studio Build Tools or LLVM/Clang
 
 param(
     [string]$Server = "",
@@ -28,15 +21,11 @@ param(
     [switch]$Help = $false
 )
 
-# ─── 函数定义 ────────────────────────────────────────────────────
-
+# Functions
 function Write-Banner {
-    Write-Host @"
-    ╔══════════════════════════════════════════════════════════════╗
-    ║     P2P Mesh Network — 客户端部署 (Windows)                 ║
-    ║     Client Deployment v2.0.0                                ║
-    ╚══════════════════════════════════════════════════════════════╝
-"@ -ForegroundColor Cyan
+    Write-Host "==============================================================" -ForegroundColor Cyan
+    Write-Host "  P2P Mesh Network - Client Deployment (Windows) v2.0.0" -ForegroundColor Cyan
+    Write-Host "==============================================================" -ForegroundColor Cyan
 }
 
 function Write-Log {
@@ -49,120 +38,115 @@ function Write-Log {
         default   { "White" }
     }
     $prefix = switch ($Level) {
-        "SUCCESS" { "[✓]" }
+        "SUCCESS" { "[OK]" }
         "WARN"    { "[!]" }
-        "ERROR"   { "[✗]" }
+        "ERROR"   { "[X]" }
         "INFO"    { "[i]" }
         default   { "   " }
     }
     Write-Host "$prefix $Message" -ForegroundColor $color
-    Add-Content -Path "$env:TEMP\p2p-mesh-client-deploy.log" -Value "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') $Level $Message"
+    $logLine = "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') $Level $Message"
+    Add-Content -Path "$env:TEMP\p2p-mesh-client-deploy.log" -Value $logLine
 }
 
-# ─── 检测系统 ────────────────────────────────────────────────────
+# System check
 function Test-System {
-    Write-Log "检测系统环境..." "INFO"
-
+    Write-Log "Checking system environment..." "INFO"
     $os = Get-CimInstance Win32_OperatingSystem
-    Write-Log "操作系统: $($os.Caption) ($($os.Version))" "INFO"
-    Write-Log "CPU 架构: $env:PROCESSOR_ARCHITECTURE" "INFO"
-    Write-Log "内存: $([math]::Round($os.TotalVisibleMemorySize / 1MB, 1)) GB" "INFO"
+    Write-Log "OS: $($os.Caption) ($($os.Version))" "INFO"
+    Write-Log "CPU: $env:PROCESSOR_ARCHITECTURE" "INFO"
+    $memGB = [math]::Round($os.TotalVisibleMemorySize / 1MB, 1)
+    Write-Log "Memory: $memGB GB" "INFO"
 
-    # 检查是否管理员权限
     $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
     if (-not $isAdmin) {
-        Write-Log "建议以管理员身份运行此脚本 (部分功能需要管理员权限)" "WARN"
+        Write-Log "Recommend running as Administrator (some features need elevated privileges)" "WARN"
     }
-
-    Write-Log "系统检测完成" "SUCCESS"
+    Write-Log "System check complete" "SUCCESS"
 }
 
-# ─── 安装 Rust ────────────────────────────────────────────────────
+# Install Rust
 function Install-Rust {
-    Write-Log "检查 Rust 工具链..." "INFO"
+    Write-Log "Checking Rust toolchain..." "INFO"
 
-    $rustInstalled = $null
-    try {
-        $rustInstalled = Get-Command rustc -ErrorAction SilentlyContinue
-    }
-    catch { }
-
+    $rustInstalled = Get-Command rustc -ErrorAction SilentlyContinue
     if ($rustInstalled) {
         $version = & rustc --version 2>$null
-        Write-Log "Rust 已安装: $version" "SUCCESS"
+        Write-Log "Rust already installed: $version" "SUCCESS"
     }
     else {
-        Write-Log "正在安装 Rust 工具链..." "INFO"
-        Write-Log "下载 rustup-init.exe..." "INFO"
+        Write-Log "Installing Rust toolchain..." "INFO"
+        Write-Log "Downloading rustup-init.exe..." "INFO"
 
         $rustupUrl = "https://static.rust-lang.org/rustup/dist/x86_64-pc-windows-msvc/rustup-init.exe"
-        $rustupPath = "$env:TEMP\rustup-init.exe"
+        $rustupPath = Join-Path $env:TEMP "rustup-init.exe"
 
         try {
             Invoke-WebRequest -Uri $rustupUrl -OutFile $rustupPath -UseBasicParsing
-            Write-Log "正在安装 Rust (这可能需要几分钟)..." "INFO"
+            Write-Log "Running rustup installer (this may take a few minutes)..." "INFO"
             & $rustupPath -y --default-toolchain stable 2>&1 | Out-Null
             Remove-Item $rustupPath -Force -ErrorAction SilentlyContinue
 
-            # 刷新环境变量
-            $env:PATH = "$env:USERPROFILE\.cargo\bin;$env:PATH"
-            Write-Log "Rust 安装完成" "SUCCESS"
+            # Refresh PATH
+            $cargoBin = Join-Path $env:USERPROFILE ".cargo\bin"
+            $env:PATH = "$cargoBin;$env:PATH"
+            Write-Log "Rust installation complete" "SUCCESS"
         }
         catch {
-            Write-Log "Rust 安装失败: $_" "ERROR"
-            Write-Log "请手动安装: https://rustup.rs" "INFO"
+            Write-Log "Rust installation failed: $_" "ERROR"
+            Write-Log "Please install manually: https://rustup.rs" "INFO"
             exit 1
         }
     }
 
-    # 确保 Rust 在 PATH 中
-    $cargoPath = "$env:USERPROFILE\.cargo\bin\cargo.exe"
+    # Verify Cargo
+    $cargoPath = Join-Path $env:USERPROFILE ".cargo\bin\cargo.exe"
     if (-not (Test-Path $cargoPath)) {
-        Write-Log "找不到 Cargo，请确保 Rust 已正确安装" "ERROR"
+        Write-Log "Cargo not found. Ensure Rust is installed correctly." "ERROR"
         exit 1
     }
 }
 
-# ─── 检查构建工具 ────────────────────────────────────────────────
+# Check build tools
 function Test-BuildTools {
-    Write-Log "检查 C++ 构建工具..." "INFO"
+    Write-Log "Checking C++ build tools..." "INFO"
 
-    # 检查 Visual Studio Build Tools
-    $vsWhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+    # Check Visual Studio Build Tools
+    $vsWhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
     if (Test-Path $vsWhere) {
         $vsPath = & $vsWhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath 2>$null
         if ($vsPath) {
-            Write-Log "Visual Studio Build Tools 已安装: $vsPath" "SUCCESS"
+            Write-Log "Visual Studio Build Tools found: $vsPath" "SUCCESS"
             return
         }
     }
 
-    # 检查 winget 方式安装
+    # Check Clang/LLVM
     $clangPath = Get-Command clang -ErrorAction SilentlyContinue
     if ($clangPath) {
-        Write-Log "Clang/LLVM 已安裝" "SUCCESS"
+        Write-Log "Clang/LLVM found" "SUCCESS"
         return
     }
 
-    Write-Log "未找到 C++ 构建工具。" "WARN"
-    Write-Log "Rust 在 Windows 上编译需要 Microsoft Visual C++ Build Tools 或 LLVM/Clang。" "INFO"
-    Write-Log "推荐安装方式:" "INFO"
-    Write-Log "  1. 运行: winget install Microsoft.VisualStudio.2022.BuildTools --silent --override '--wait --add Microsoft.VisualStudio.Workload.VCTools'" "INFO"
-    Write-Log "  2. 或访问: https://visualstudio.microsoft.com/downloads/#build-tools-for-visual-studio-2022" "INFO"
-    Write-Log "  选择 'C++ 生成工具' 工作负载" "INFO"
-    Write-Log "安装完成后重新运行此脚本。" "INFO"
+    Write-Log "C++ build tools not found." "WARN"
+    Write-Log "Rust on Windows requires Visual C++ Build Tools or LLVM/Clang." "INFO"
+    Write-Log "Install options:" "INFO"
+    Write-Log "  1. winget install Microsoft.VisualStudio.2022.BuildTools --silent" "INFO"
+    Write-Log "  2. https://visualstudio.microsoft.com/downloads/#build-tools-for-visual-studio-2022" "INFO"
+    Write-Log "  Select 'Desktop development with C++' workload" "INFO"
+    Write-Log "Re-run this script after installation." "INFO"
     exit 1
 }
 
-# ─── 编译客户端 ──────────────────────────────────────────────────
+# Build client binary
 function Build-Client {
-    Write-Log "编译 mesh-tunnel 客户端..." "INFO"
+    Write-Log "Building mesh-tunnel client..." "INFO"
 
     $projectDir = Split-Path -Parent $PSScriptRoot
     $dataPlaneDir = Join-Path $projectDir "data-plane"
 
     if (-not (Test-Path (Join-Path $dataPlaneDir "Cargo.toml"))) {
-        Write-Log "未找到 Cargo.toml: $dataPlaneDir" "ERROR"
+        Write-Log "Cargo.toml not found: $dataPlaneDir" "ERROR"
         exit 1
     }
 
@@ -170,7 +154,7 @@ function Build-Client {
     try {
         $buildResult = & cargo build --release --bin mesh-tunnel 2>&1
         if ($LASTEXITCODE -ne 0) {
-            Write-Log "编译失败:" "ERROR"
+            Write-Log "Build failed:" "ERROR"
             Write-Host $buildResult
             exit 1
         }
@@ -182,19 +166,19 @@ function Build-Client {
     $binaryPath = Join-Path $dataPlaneDir "target\release\mesh-tunnel.exe"
     if (Test-Path $binaryPath) {
         $size = "{0:N1} MB" -f ((Get-Item $binaryPath).Length / 1MB)
-        Write-Log "编译成功! 二进制大小: $size" "SUCCESS"
+        Write-Log "Build successful! Binary size: $size" "SUCCESS"
     }
     else {
-        Write-Log "编译失败，未找到 mesh-tunnel.exe" "ERROR"
+        Write-Log "Build failed: mesh-tunnel.exe not found" "ERROR"
         exit 1
     }
 }
 
-# ─── 安装二进制文件 ──────────────────────────────────────────────
+# Install binary
 function Install-Binary {
-    Write-Log "安装 mesh-tunnel..." "INFO"
+    Write-Log "Installing mesh-tunnel..." "INFO"
 
-    $installDir = "$env:ProgramFiles\P2P-Mesh-Client"
+    $installDir = Join-Path $env:ProgramFiles "P2P-Mesh-Client"
     $projectDir = Split-Path -Parent $PSScriptRoot
     $binaryPath = Join-Path $projectDir "data-plane\target\release\mesh-tunnel.exe"
 
@@ -204,59 +188,59 @@ function Install-Binary {
 
     Copy-Item $binaryPath -Destination "$installDir\bin\mesh-tunnel.exe" -Force
 
-    # 添加到 PATH
+    # Add to system PATH
     $currentPath = [Environment]::GetEnvironmentVariable("PATH", "Machine")
-    if ($currentPath -notlike "*$installDir\bin*") {
-        [Environment]::SetEnvironmentVariable("PATH", "$currentPath;$installDir\bin", "Machine")
-        Write-Log "已添加到系统 PATH" "SUCCESS"
+    $binPath = Join-Path $installDir "bin"
+    if ($currentPath -notlike "*$binPath*") {
+        [Environment]::SetEnvironmentVariable("PATH", "$currentPath;$binPath", "Machine")
+        Write-Log "Added to system PATH" "SUCCESS"
     }
 
-    Write-Log "安装完成: $installDir" "SUCCESS"
+    Write-Log "Installation complete: $installDir" "SUCCESS"
 }
 
-# ─── 交互式配置 ──────────────────────────────────────────────────
+# Interactive configuration
 function Set-ClientConfig {
-    Write-Log "配置客户端参数" "INFO"
+    Write-Log "Configuring client..." "INFO"
 
-    $configDir = "$env:APPDATA\p2p-mesh"
+    $configDir = Join-Path $env:APPDATA "p2p-mesh"
     $configFile = Join-Path $configDir "client.toml"
     New-Item -ItemType Directory -Force -Path $configDir | Out-Null
 
-    if ((Test-Path $configFile) -and -not $ForceConfig) {
-        Write-Log "配置文件已存在: $configFile" "WARN"
-        $overwrite = Read-Host "  是否覆盖? [y/N]"
+    if (Test-Path $configFile) {
+        Write-Log "Config file exists: $configFile" "WARN"
+        $overwrite = Read-Host "  Overwrite? [y/N]"
         if ($overwrite -notmatch '^[Yy]$') {
-            Write-Log "保留现有配置" "INFO"
+            Write-Log "Keeping existing config" "INFO"
             return
         }
     }
 
-    # API 服务器
+    # API server
     $apiServer = $Server
     if (-not $apiServer) {
-        $apiServer = Read-Host "  API 服务器地址 (例如 https://mesh.yourdomain.com)"
+        $apiServer = Read-Host "  API server URL (e.g. https://mesh.yourdomain.com)"
         if (-not $apiServer) { $apiServer = "http://localhost:8000" }
     }
 
-    # 认证令牌
+    # Auth token
     $authToken = $Token
     if (-not $authToken) {
-        $authToken = Read-Host "  认证令牌 (留空稍后配置)"
+        $authToken = Read-Host "  Auth token (leave blank to configure later)"
     }
 
-    # 监听端口
-    $listenPort = Read-Host "  本地监听端口 [51820]"
+    # Listen port
+    $listenPort = Read-Host "  Local listen port [51820]"
     if (-not $listenPort) { $listenPort = "51820" }
 
-    # 日志级别
-    $logLevel = Read-Host "  日志级别 (trace/debug/info/warn/error) [info]"
+    # Log level
+    $logLevel = Read-Host "  Log level (trace/debug/info/warn/error) [info]"
     if (-not $logLevel) { $logLevel = "info" }
 
-    # 写入配置
-@"
-# P2P Mesh Network — 客户端配置 (Windows)
-# 生成时间: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
-# 模式: tunnel
+    # Write config
+    $content = @"
+# P2P Mesh Network - Client Configuration (Windows)
+# Generated: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
 
 [client]
 mode = "tunnel"
@@ -275,192 +259,183 @@ heartbeat_interval = 30
 health_check_interval = 10
 quic_idle_timeout = 30
 ai_routing_enabled = false
-"@ | Out-File -FilePath $configFile -Encoding utf8
+"@
 
-    Write-Log "配置已保存: $configFile" "SUCCESS"
+    $content | Out-File -FilePath $configFile -Encoding utf8
+    Write-Log "Config saved: $configFile" "SUCCESS"
 
-    $tokenDisplay = if ($authToken) { "$($authToken.Substring(0, [Math]::Min(8, $authToken.Length)))..." } else { "未设置" }
+    $tokenDisplay = if ($authToken -and $authToken.Length -gt 0) { "$($authToken.Substring(0, [Math]::Min(8, $authToken.Length)))..." } else { "not set" }
     Write-Host ""
-    Write-Host "配置摘要:" -ForegroundColor White
-    Write-Host "  服务器:     $apiServer" -ForegroundColor Cyan
-    Write-Host "  本地端口:   $listenPort" -ForegroundColor Cyan
-    Write-Host "  令牌:       $tokenDisplay" -ForegroundColor Cyan
+    Write-Host "Configuration summary:" -ForegroundColor White
+    Write-Host "  Server:       $apiServer" -ForegroundColor Cyan
+    Write-Host "  Listen port:  $listenPort" -ForegroundColor Cyan
+    Write-Host "  Token:        $tokenDisplay" -ForegroundColor Cyan
     Write-Host ""
 }
 
-# ─── 安装 Windows 服务 ───────────────────────────────────────────
+# Install Windows Service
 function Install-WindowsService {
-    Write-Log "安装 Windows 服务..." "INFO"
+    Write-Log "Installing Windows service..." "INFO"
 
-    $installDir = "$env:ProgramFiles\P2P-Mesh-Client"
-    $configDir = "$env:APPDATA\p2p-mesh"
+    $installDir = Join-Path $env:ProgramFiles "P2P-Mesh-Client"
+    $configDir = Join-Path $env:APPDATA "p2p-mesh"
     $serviceName = "P2PMeshTunnel"
 
-    # 检查是否已存在
+    # Remove existing
     $existingService = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
     if ($existingService) {
-        Write-Log "服务已存在，正在停止..." "WARN"
+        Write-Log "Service exists, stopping and removing..." "WARN"
         Stop-Service $serviceName -Force -ErrorAction SilentlyContinue
         sc.exe delete $serviceName 2>&1 | Out-Null
         Start-Sleep -Seconds 2
     }
 
-    # 使用 nssm (Non-Sucking Service Manager) 或 sc.exe
-    # 这里使用 sc.exe 创建 Windows 服务
-    $binaryPath = "$installDir\bin\mesh-tunnel.exe"
-    $configPath = "$configDir\client.toml"
+    $binaryPath = Join-Path $installDir "bin\mesh-tunnel.exe"
+    $configPath = Join-Path $configDir "client.toml"
 
-    $result = sc.exe create $serviceName `
-        binPath= "$binaryPath --config `"$configPath`"" `
-        start= auto `
-        DisplayName= "P2P Mesh Tunnel Client" `
-        obj= LocalSystem 2>&1
+    # sc.exe requires binPath= format with space after =
+    $binArg = "`"$binaryPath`" --config `"$configPath`""
+
+    $result = sc.exe create $serviceName binPath= $binArg start= auto DisplayName= "P2P Mesh Tunnel Client" obj= LocalSystem 2>&1
 
     if ($LASTEXITCODE -eq 0) {
-        # 配置服务恢复选项
         sc.exe failure $serviceName reset= 86400 actions= restart/5000/restart/10000/restart/30000 2>&1 | Out-Null
-        sc.exe description $serviceName "P2P Mesh Network — Mesh Tunnel Client Service" 2>&1 | Out-Null
+        sc.exe description $serviceName "P2P Mesh Network - Mesh Tunnel Client Service" 2>&1 | Out-Null
 
-        # 启动服务
         Start-Service $serviceName -ErrorAction SilentlyContinue
         Start-Sleep -Seconds 3
 
         $svc = Get-Service $serviceName -ErrorAction SilentlyContinue
         if ($svc -and $svc.Status -eq 'Running') {
-            Write-Log "Windows 服务安装成功并运行中" "SUCCESS"
+            Write-Log "Windows service installed and running" "SUCCESS"
         }
         else {
-            Write-Log "服务已安装但可能未成功启动，请检查日志" "WARN"
-            Write-Log "  查看日志: Get-EventLog -LogName Application -Source P2PMeshTunnel" "INFO"
+            Write-Log "Service installed but may not be running. Check logs." "WARN"
+            $logHint = "Get-EventLog -LogName Application -Source P2PMeshTunnel"
+            Write-Log "  View logs: $logHint" "INFO"
         }
     }
     else {
-        Write-Log "创建 Windows 服务失败: $result" "ERROR"
-        Write-Log "您也可以手动运行:" "INFO"
-        Write-Log "  $binaryPath --config `"$configPath`"" "INFO"
+        Write-Log "Failed to create Windows service: $result" "ERROR"
+        Write-Log "You can also run manually:" "INFO"
+        Write-Log "  $binaryPath --config $configPath" "INFO"
     }
 }
 
-# ─── 创建快捷方式 ────────────────────────────────────────────────
+# Create desktop shortcut
 function New-DesktopShortcut {
-    Write-Log "创建桌面快捷方式..." "INFO"
+    Write-Log "Creating desktop shortcut..." "INFO"
 
-    $installDir = "$env:ProgramFiles\P2P-Mesh-Client"
+    $installDir = Join-Path $env:ProgramFiles "P2P-Mesh-Client"
     $desktopPath = [Environment]::GetFolderPath("Desktop")
 
-    # 创建启动脚本
-    $startScript = @"
-@echo off
-echo Starting P2P Mesh Tunnel Client...
-"$installDir\bin\mesh-tunnel.exe" --config "%APPDATA%\p2p-mesh\client.toml"
-pause
-"@
+    # Create launcher batch file
+    $batPath = Join-Path $installDir "bin\start-tunnel.bat"
+    $batContent = "@echo off`r`necho Starting P2P Mesh Tunnel Client...`r`n`"$installDir\bin\mesh-tunnel.exe`" --config `"%APPDATA%\p2p-mesh\client.toml`"`r`npause`r`n"
+    $batContent | Out-File -FilePath $batPath -Encoding ASCII
 
-    $startScriptPath = "$installDir\bin\start-tunnel.bat"
-    $startScript | Out-File -FilePath $startScriptPath -Encoding ASCII
-
-    # 创建快捷方式
+    # Create shortcut
     $WshShell = New-Object -ComObject WScript.Shell
-    $Shortcut = $WshShell.CreateShortcut("$desktopPath\P2P Mesh Tunnel.lnk")
-    $Shortcut.TargetPath = $startScriptPath
+    $shortcutPath = Join-Path $desktopPath "P2P Mesh Tunnel.lnk"
+    $Shortcut = $WshShell.CreateShortcut($shortcutPath)
+    $Shortcut.TargetPath = $batPath
     $Shortcut.WorkingDirectory = $installDir
-    $Shortcut.Description = "启动 P2P Mesh Tunnel 客户端"
+    $Shortcut.Description = "Start P2P Mesh Tunnel Client"
     $Shortcut.Save()
 
-    Write-Log "桌面快捷方式已创建" "SUCCESS"
+    Write-Log "Desktop shortcut created" "SUCCESS"
 }
 
-# ─── 连通性测试 ──────────────────────────────────────────────────
+# Connection test
 function Test-Connection {
-    Write-Log "连通性测试" "INFO"
+    Write-Log "Testing connectivity..." "INFO"
 
     $apiUrl = if ($Server) { $Server } else { "http://localhost:8000" }
 
     try {
         $response = Invoke-WebRequest -Uri "$apiUrl/health" -UseBasicParsing -TimeoutSec 5 -ErrorAction Stop
-        Write-Log "API 连接测试通过: $apiUrl (状态码: $($response.StatusCode))" "SUCCESS"
+        Write-Log "API reachable: $apiUrl (status: $($response.StatusCode))" "SUCCESS"
     }
     catch {
-        Write-Log "API 服务器不可达: $apiUrl" "WARN"
-        Write-Log "请检查防火墙和网络配置" "INFO"
+        Write-Log "API not reachable: $apiUrl" "WARN"
+        Write-Log "Please check firewall and network settings" "INFO"
     }
 }
 
-# ─── 卸载 ────────────────────────────────────────────────────────
+# Uninstall
 function Uninstall-Client {
-    Write-Host "=== P2P Mesh 客户端卸载 ===" -ForegroundColor Yellow
+    Write-Host "=== P2P Mesh Client Uninstall ===" -ForegroundColor Yellow
     Write-Host ""
 
-    $installDir = "$env:ProgramFiles\P2P-Mesh-Client"
-    $configDir = "$env:APPDATA\p2p-mesh"
+    $installDir = Join-Path $env:ProgramFiles "P2P-Mesh-Client"
+    $configDir = Join-Path $env:APPDATA "p2p-mesh"
     $serviceName = "P2PMeshTunnel"
 
-    # 停止并删除服务
+    # Stop and delete service
     $existingService = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
     if ($existingService) {
         Stop-Service $serviceName -Force -ErrorAction SilentlyContinue
         sc.exe delete $serviceName 2>&1 | Out-Null
-        Write-Log "Windows 服务已删除" "SUCCESS"
+        Write-Log "Windows service removed" "SUCCESS"
     }
 
-    # 删除安装目录
+    # Remove install dir
     if (Test-Path $installDir) {
         Remove-Item $installDir -Recurse -Force -ErrorAction SilentlyContinue
-        Write-Log "安装目录已删除: $installDir" "SUCCESS"
+        Write-Log "Install directory removed: $installDir" "SUCCESS"
     }
 
-    # 保留配置
+    # Keep config unless user says otherwise
     if (Test-Path $configDir) {
-        Write-Log "配置文件保留在: $configDir" "WARN"
-        $deleteConfig = Read-Host "  是否删除配置文件? [y/N]"
+        Write-Log "Config preserved at: $configDir" "WARN"
+        $deleteConfig = Read-Host "  Delete config files? [y/N]"
         if ($deleteConfig -match '^[Yy]$') {
             Remove-Item $configDir -Recurse -Force
-            Write-Log "配置文件已删除" "SUCCESS"
+            Write-Log "Config files deleted" "SUCCESS"
         }
     }
 
-    # 删除桌面快捷方式
+    # Remove desktop shortcut
     $desktopPath = [Environment]::GetFolderPath("Desktop")
-    $shortcutPath = "$desktopPath\P2P Mesh Tunnel.lnk"
+    $shortcutPath = Join-Path $desktopPath "P2P Mesh Tunnel.lnk"
     if (Test-Path $shortcutPath) {
         Remove-Item $shortcutPath -Force
-        Write-Log "桌面快捷方式已删除" "SUCCESS"
+        Write-Log "Desktop shortcut removed" "SUCCESS"
     }
 
     Write-Host ""
-    Write-Log "卸载完成" "SUCCESS"
+    Write-Log "Uninstall complete" "SUCCESS"
     exit 0
 }
 
-# ─── 帮助 ────────────────────────────────────────────────────────
+# Help
 function Show-Help {
     Write-Host @"
+P2P Mesh Network - Windows Client Deployment Script
 
-P2P Mesh Network — Windows 客户端部署脚本
+Usage:
+  .\scripts\deploy-client.ps1 [options]
 
-用法:
-  .\scripts\deploy-client.ps1 [参数]
+Options:
+  -Server <URL>     API server URL
+  -Token <TOKEN>    Auth token
+  -Uninstall        Uninstall the client
+  -Help             Show this help
 
-参数:
-  -Server <URL>     API 服务器地址
-  -Token <TOKEN>    认证令牌
-  -Uninstall        卸载客户端
-  -Help             显示此帮助
-
-示例:
+Examples:
   .\scripts\deploy-client.ps1 -Server "https://mesh.example.com" -Token "eyJ..."
-
+  .\scripts\deploy-client.ps1 -Uninstall
 "@
     exit 0
 }
 
-# ─── 主流程 ──────────────────────────────────────────────────────
+# Main
 function Main {
     if ($Help) { Show-Help }
     if ($Uninstall) { Uninstall-Client }
 
-    $logFile = "$env:TEMP\p2p-mesh-client-deploy.log"
-    "=== P2P Mesh 客户端部署 (Windows) — $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') ===" | Out-File $logFile
+    $logFile = Join-Path $env:TEMP "p2p-mesh-client-deploy.log"
+    "=== P2P Mesh Client Deployment (Windows) - $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') ===" | Out-File $logFile
 
     Write-Banner
 
@@ -475,20 +450,19 @@ function Main {
     Test-Connection
 
     Write-Host ""
-    Write-Host "╔══════════════════════════════════════════════════════════════╗" -ForegroundColor Green
-    Write-Host "║         🎉 客户端部署完成！Client Deployed!                  ║" -ForegroundColor Green
-    Write-Host "╚══════════════════════════════════════════════════════════════╝" -ForegroundColor Green
+    Write-Host "==============================================================" -ForegroundColor Green
+    Write-Host "  Client deployment complete!" -ForegroundColor Green
+    Write-Host "==============================================================" -ForegroundColor Green
     Write-Host ""
-
-    Write-Host "📋 常用操作:" -ForegroundColor White
-    Write-Host "  查看状态:   Get-Service P2PMeshTunnel" -ForegroundColor Cyan
-    Write-Host "  查看日志:   Get-EventLog -LogName Application -Source P2PMeshTunnel -Newest 50" -ForegroundColor Cyan
-    Write-Host "  启动服务:   Start-Service P2PMeshTunnel" -ForegroundColor Cyan
-    Write-Host "  停止服务:   Stop-Service P2PMeshTunnel" -ForegroundColor Cyan
-    Write-Host "  编辑配置:   notepad `"$env:APPDATA\p2p-mesh\client.toml`"" -ForegroundColor Cyan
-    Write-Host "  卸载:       .\scripts\deploy-client.ps1 -Uninstall" -ForegroundColor Cyan
+    Write-Host "Quick commands:" -ForegroundColor White
+    Write-Host "  Status:    Get-Service P2PMeshTunnel" -ForegroundColor Cyan
+    Write-Host "  Logs:      Get-EventLog -LogName Application -Source P2PMeshTunnel -Newest 50" -ForegroundColor Cyan
+    Write-Host "  Start:     Start-Service P2PMeshTunnel" -ForegroundColor Cyan
+    Write-Host "  Stop:      Stop-Service P2PMeshTunnel" -ForegroundColor Cyan
+    Write-Host "  Config:    notepad `"$configDir\client.toml`"" -ForegroundColor Cyan
+    Write-Host "  Uninstall: .\scripts\deploy-client.ps1 -Uninstall" -ForegroundColor Cyan
     Write-Host ""
 }
 
-# 执行
+# Execute
 Main

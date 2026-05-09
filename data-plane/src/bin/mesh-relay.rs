@@ -13,6 +13,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use clap::Parser;
+use p2p_mesh_dataplane::http_gateway::{AuthProvider, HttpGateway, HttpGatewayConfig};
 use p2p_mesh_dataplane::relay::{self, ForwardingTable};
 use tokio::net::UdpSocket;
 
@@ -85,7 +86,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Relay nodes are pre-registered by an admin through the API.
     // The relay only sends heartbeats — it does NOT self-register.
 
-    let client = reqwest::Client::new();
+    let gateway = HttpGateway::new(HttpGatewayConfig {
+        base_url: args.api_url.clone(),
+        auth: AuthProvider::jwt(args.relay_auth_token.clone()),
+        ..Default::default()
+    })?;
+    let gateway = Arc::new(gateway);
 
     let relay_table = forwarding_table.clone();
     let relay_socket = socket.clone();
@@ -93,11 +99,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         relay::relay_loop(relay_socket, relay_table).await;
     });
 
-    let heartbeat_api = args.api_url.clone();
+    let heartbeat_gw = gateway.clone();
     let heartbeat_id = args.relay_id.clone();
     let heartbeat_interval = args.heartbeat_interval;
     let heartbeat_table = forwarding_table.clone();
-    let relay_token = args.relay_auth_token.clone();
     let max_conn = args.max_connections;
 
     let heartbeat_task = tokio::spawn(async move {
@@ -115,27 +120,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 "bandwidth_used_mbps": 0.0,
             });
 
-            match client
-                .post(format!(
-                    "{}/api/v1/relay/{}/heartbeat",
-                    heartbeat_api, heartbeat_id
-                ))
-                .header("Authorization", format!("Bearer {}", relay_token))
-                .json(&payload)
-                .send()
+            match heartbeat_gw
+                .post::<_, serde_json::Value>(
+                    &format!("/api/v1/relay/{}/heartbeat", heartbeat_id),
+                    &payload,
+                )
                 .await
             {
-                Ok(resp) => {
-                    if resp.status().is_success() {
-                        log::debug!(
-                            "Heartbeat sent: load={:.2}, connections={}, bytes={}, packets={}",
-                            load, device_count, total_bytes, total_packets
-                        );
-                    } else {
-                        log::warn!("Heartbeat rejected: HTTP {} — check RELAY_AUTH_TOKEN", resp.status());
-                    }
+                Ok(_) => {
+                    log::debug!(
+                        "Heartbeat sent: load={:.2}, connections={}, bytes={}, packets={}",
+                        load, device_count, total_bytes, total_packets
+                    );
                 }
-                Err(e) => log::error!("Heartbeat failed: {}", e),
+                Err(e) => {
+                    log::warn!("Heartbeat failed: {} — check RELAY_AUTH_TOKEN", e);
+                }
             }
         }
     });

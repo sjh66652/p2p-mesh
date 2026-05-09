@@ -1,7 +1,7 @@
 {
   "latency": {
     "LAN": {
-      "avg_ms": 0.51,
+      "avg_ms": 0.52,
       "min_ms": 0.4,
       "max_ms": 0.6,
       "loss_pct": 0.0,
@@ -9,20 +9,20 @@
       "samples": 200
     },
     "WAN": {
-      "avg_ms": 31.1,
-      "min_ms": 25.08,
-      "max_ms": 34.86,
+      "avg_ms": 31.72,
+      "min_ms": 25.02,
+      "max_ms": 34.98,
       "loss_pct": 0.0,
-      "quality": 0.9689,
+      "quality": 0.9683,
       "samples": 200
     },
     "Satellite": {
-      "avg_ms": 248.52,
-      "min_ms": 230.04,
-      "max_ms": 268.82,
-      "loss_pct": 1.5,
-      "quality": 0.747,
-      "samples": 197
+      "avg_ms": 252.39,
+      "min_ms": 230.08,
+      "max_ms": 269.87,
+      "loss_pct": 0.0,
+      "quality": 0.7476,
+      "samples": 200
     }
   },
   "relay_pps": {

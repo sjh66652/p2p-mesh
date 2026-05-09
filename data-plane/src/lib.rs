@@ -31,7 +31,6 @@
 //!   ML path prediction, congestion forecasting, anomaly detection
 //!
 //! Phase 10 — Research-Grade Network System:
-//! Phase 10 — Research-Grade Network System:
 //!   DPDK, io_uring, QUIC multipath, Post-Quantum Crypto, Smart Relay
 
 // Crate-level lint configuration
@@ -48,6 +47,9 @@ pub mod quic;
 pub mod multipath;
 pub mod metrics;
 pub mod relay;
+
+// External service connectivity
+pub mod http_gateway;
 
 // Overlay Network (Phase 1)
 pub mod tun;

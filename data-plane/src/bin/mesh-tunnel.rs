@@ -33,6 +33,7 @@ fn warn_plaintext_http(url: &str, label: &str) {
 
 // Project modules
 use p2p_mesh_dataplane::crypto::SessionKey;
+use p2p_mesh_dataplane::http_gateway::{AuthProvider, HttpGateway, HttpGatewayConfig};
 use p2p_mesh_dataplane::metrics::PathMetrics;
 use p2p_mesh_dataplane::multipath::MultiPathManager;
 use p2p_mesh_dataplane::puncher;
@@ -129,7 +130,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let tunnel_manager = Arc::new(Mutex::new(TunnelManager::new(socket.clone())));
     let multi_path = Arc::new(MultiPathManager::new());
 
-    // ---- Step 5: Connect to signaling via WebSocket ----
+    // ---- Step 5: HTTP Gateway for control plane API ----
+    let gateway = HttpGateway::new(HttpGatewayConfig {
+        base_url: args.api_url.clone(),
+        auth: AuthProvider::jwt(args.token.clone()),
+        max_retries: 2,
+        ..Default::default()
+    })?;
+    let gateway = Arc::new(gateway);
+    log::info!("HTTP gateway initialized for {}", args.api_url);
+
+    // ---- Step 6: Connect to signaling via WebSocket ----
     let ws_connect_url = format!("{}/{}", args.ws_url, args.device_id);
     log::info!(
         "Connecting to signaling server: {} (auth via Authorization header)",
@@ -137,9 +148,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     // Send our candidates to the control plane
-    submit_candidates(&args.api_url, &args.token, &args.device_id, &candidates).await;
+    submit_candidates(&gateway, &args.device_id, &candidates).await;
 
-    // ---- Step 6: Main event loop ----
+    // ---- Step 7: Main event loop ----
     let mut buf = vec![0u8; 65536];
     let mut traffic_batch: Vec<u64> = Vec::new();
     let report_interval = Duration::from_secs(60);
@@ -187,7 +198,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 // Periodic traffic reporting
                 if last_report.elapsed() >= report_interval && !traffic_batch.is_empty() {
                     report_traffic(
-                        &args.api_url, &args.token, &args.device_id, &traffic_batch
+                        &gateway, &args.device_id, &traffic_batch
                     ).await;
                     traffic_batch.clear();
                     last_report = tokio::time::Instant::now();
@@ -240,13 +251,10 @@ async fn handle_punch_message(
 
 /// Submit our candidates to the control plane for peer exchange.
 async fn submit_candidates(
-    api_url: &str,
-    token: &str,
+    gateway: &HttpGateway,
     device_id: &str,
     candidates: &[puncher::Candidate],
 ) {
-    let client = reqwest::Client::new();
-
     let candidate_list: Vec<serde_json::Value> = candidates
         .iter()
         .map(|c| {
@@ -263,33 +271,19 @@ async fn submit_candidates(
         "candidates": candidate_list,
     });
 
-    match client
-        .post(format!("{}/api/v1/candidates", api_url))
-        .header("Authorization", format!("Bearer {}", token))
-        .json(&payload)
-        .send()
-        .await
-    {
-        Ok(resp) => {
-            if resp.status().is_success() {
-                log::info!("Candidates submitted successfully");
-            } else {
-                log::warn!("Candidate submission failed: HTTP {}", resp.status());
-            }
-        }
-        Err(e) => log::error!("Candidate submission error: {}", e),
+    match gateway.post::<_, serde_json::Value>("/api/v1/candidates", &payload).await {
+        Ok(_) => log::info!("Candidates submitted successfully"),
+        Err(e) => log::error!("Candidate submission failed: {}", e),
     }
 }
 
 /// Report traffic statistics to the control plane API.
 async fn report_traffic(
-    api_url: &str,
-    token: &str,
+    gateway: &HttpGateway,
     device_id: &str,
     bytes_list: &[u64],
 ) {
     let total_bytes: u64 = bytes_list.iter().sum();
-    let client = reqwest::Client::new();
 
     let payload = serde_json::json!({
         "device_id": device_id,
@@ -298,20 +292,8 @@ async fn report_traffic(
         "connection_type": "p2p",
     });
 
-    match client
-        .post(format!("{}/api/v1/traffic/report", api_url))
-        .header("Authorization", format!("Bearer {}", token))
-        .json(&payload)
-        .send()
-        .await
-    {
-        Ok(resp) => {
-            if resp.status().is_success() {
-                log::debug!("Traffic reported: {} bytes", total_bytes);
-            } else {
-                log::warn!("Traffic report failed: {}", resp.status());
-            }
-        }
+    match gateway.post::<_, serde_json::Value>("/api/v1/traffic/report", &payload).await {
+        Ok(_) => log::debug!("Traffic reported: {} bytes", total_bytes),
         Err(e) => log::error!("Traffic report error: {}", e),
     }
 }
