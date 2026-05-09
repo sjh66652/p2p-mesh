@@ -39,9 +39,10 @@ use tokio::sync::RwLock;
 // ─── Auth Provider ───────────────────────────────────────────────────────────
 
 /// Authentication strategy for external HTTP APIs.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub enum AuthProvider {
     /// No authentication (public APIs).
+    #[default]
     NoAuth,
     /// JWT Bearer token — "Authorization: Bearer <token>".
     BearerToken { token: String },
@@ -72,12 +73,6 @@ impl AuthProvider {
             Self::BearerToken { token } => builder.header("Authorization", format!("Bearer {}", token)),
             Self::ApiKey { key, header_name } => builder.header(header_name, key),
         }
-    }
-}
-
-impl Default for AuthProvider {
-    fn default() -> Self {
-        Self::NoAuth
     }
 }
 
