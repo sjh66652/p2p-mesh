@@ -1,0 +1,1241 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>P2P Mesh Network — 可视化监控面板</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mermaid/10.9.0/mermaid.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg: #0a0e17;
+    --surface: #141b2d;
+    --surface2: #1a2335;
+    --border: #2a3550;
+    --text: #d1d5db;
+    --text-muted: #6b7280;
+    --primary: #3b82f6;
+    --primary-dim: #1d4ed8;
+    --success: #10b981;
+    --warning: #f59e0b;
+    --danger: #ef4444;
+    --cyan: #06b6d4;
+    --purple: #8b5cf6;
+    --orange: #f97316;
+    --radius: 12px;
+    --shadow: 0 4px 24px rgba(0,0,0,0.3);
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    min-height: 100vh;
+  }
+
+  /* ─── Header ─── */
+  .header {
+    background: linear-gradient(135deg, var(--surface) 0%, var(--surface2) 100%);
+    border-bottom: 1px solid var(--border);
+    padding: 20px 32px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 16px;
+  }
+  .header-logo {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-size: 1.4rem;
+    font-weight: 700;
+    color: #fff;
+  }
+  .header-logo svg { width: 32px; height: 32px; }
+  .header-badge {
+    background: rgba(59,130,246,0.15);
+    color: var(--primary);
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+  }
+  .header-actions {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+  }
+  .status-dot {
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    display: inline-block;
+    margin-right: 6px;
+  }
+  .status-dot.online { background: var(--success); box-shadow: 0 0 8px var(--success); }
+  .status-dot.offline { background: var(--danger); }
+  .status-dot.warning { background: var(--warning); }
+
+  /* ─── Layout ─── */
+  .layout {
+    display: grid;
+    grid-template-columns: 280px 1fr;
+    min-height: calc(100vh - 80px);
+  }
+  .sidebar {
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    padding: 20px 16px;
+  }
+  .sidebar-nav { list-style: none; }
+  .sidebar-nav li { margin-bottom: 4px; }
+  .sidebar-nav a {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    border-radius: 8px;
+    color: var(--text-muted);
+    text-decoration: none;
+    font-size: 0.9rem;
+    transition: all 0.2s;
+  }
+  .sidebar-nav a:hover, .sidebar-nav a.active {
+    background: rgba(59,130,246,0.1);
+    color: var(--primary);
+  }
+  .sidebar-nav a.active { font-weight: 600; }
+  .main-content {
+    padding: 28px 32px;
+    overflow-y: auto;
+  }
+
+  /* ─── Cards ─── */
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 24px;
+    box-shadow: var(--shadow);
+    margin-bottom: 24px;
+  }
+  .card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+  }
+  .card-title {
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: #f3f4f6;
+  }
+  .card-subtitle {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+  }
+
+  /* ─── Grids ─── */
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+  .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+  .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; }
+
+  /* ─── Stat Cards ─── */
+  .stat-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px;
+    box-shadow: var(--shadow);
+  }
+  .stat-card .label {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 8px;
+  }
+  .stat-card .value {
+    font-size: 2rem;
+    font-weight: 700;
+    color: #f3f4f6;
+  }
+  .stat-card .change {
+    font-size: 0.8rem;
+    margin-top: 4px;
+  }
+  .change.up { color: var(--success); }
+  .change.down { color: var(--danger); }
+
+  /* ─── Service Grid ─── */
+  .service-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: 16px;
+  }
+  .service-card {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px;
+    transition: all 0.2s;
+  }
+  .service-card:hover { border-color: var(--primary); }
+  .service-card .svc-name {
+    font-weight: 600;
+    color: #f3f4f6;
+    margin-bottom: 4px;
+  }
+  .service-card .svc-port {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    font-family: monospace;
+  }
+  .service-card .svc-status {
+    display: inline-block;
+    padding: 2px 10px;
+    border-radius: 12px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    margin-top: 8px;
+  }
+  .svc-status.running { background: rgba(16,185,129,0.15); color: var(--success); }
+  .svc-status.stopped { background: rgba(239,68,68,0.15); color: var(--danger); }
+  .svc-status.starting { background: rgba(245,158,11,0.15); color: var(--warning); }
+
+  /* ─── Tab System ─── */
+  .tabs { display: flex; gap: 4px; margin-bottom: 24px; border-bottom: 1px solid var(--border); padding-bottom: 0; }
+  .tab-btn {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    padding: 10px 20px;
+    font-size: 0.9rem;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    transition: all 0.2s;
+  }
+  .tab-btn.active { color: var(--primary); border-bottom-color: var(--primary); }
+  .tab-content { display: none; }
+  .tab-content.active { display: block; }
+
+  /* ─── Mermaid Diagram ─── */
+  .mermaid-wrapper {
+    background: #0d1117;
+    border-radius: var(--radius);
+    padding: 24px;
+    overflow-x: auto;
+    text-align: center;
+  }
+
+  /* ─── Code Blocks ─── */
+  .code-block {
+    background: #0d1117;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: 0.85rem;
+    overflow-x: auto;
+    position: relative;
+  }
+  .code-block .copy-btn {
+    position: absolute;
+    top: 8px; right: 8px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    padding: 4px 10px;
+    border-radius: 6px;
+    font-size: 0.75rem;
+    cursor: pointer;
+  }
+  .code-block .copy-btn:hover { color: var(--primary); border-color: var(--primary); }
+  .code-block .prompt { color: var(--success); }
+  .code-block .cmd { color: var(--cyan); }
+
+  /* ─── Chart Containers ─── */
+  .chart-box {
+    background: var(--surface2);
+    border-radius: var(--radius);
+    padding: 16px;
+    height: 280px;
+    position: relative;
+  }
+  .chart-box canvas { width: 100% !important; height: 100% !important; }
+
+  /* ─── Progress Bar ─── */
+  .progress-bar {
+    height: 8px;
+    background: var(--border);
+    border-radius: 4px;
+    overflow: hidden;
+    margin: 8px 0;
+  }
+  .progress-fill {
+    height: 100%;
+    border-radius: 4px;
+    transition: width 0.5s;
+  }
+  .progress-fill.green { background: var(--success); }
+  .progress-fill.blue { background: var(--primary); }
+  .progress-fill.orange { background: var(--orange); }
+  .progress-fill.purple { background: var(--purple); }
+
+  /* ─── Table ─── */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+  th, td {
+    padding: 12px 16px;
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+    font-size: 0.9rem;
+  }
+  th {
+    color: var(--text-muted);
+    font-weight: 600;
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  tr:hover td { background: rgba(59,130,246,0.05); }
+
+  /* ─── Responsive ─── */
+  @media (max-width: 1024px) {
+    .layout { grid-template-columns: 1fr; }
+    .sidebar { display: none; }
+    .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; }
+  }
+
+  /* ─── Buttons ─── */
+  .btn {
+    padding: 8px 18px;
+    border-radius: 8px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    border: 1px solid var(--border);
+    transition: all 0.2s;
+    text-decoration: none;
+  }
+  .btn-primary {
+    background: var(--primary);
+    color: white;
+    border-color: var(--primary);
+  }
+  .btn-primary:hover { background: var(--primary-dim); }
+  .btn-outline {
+    background: transparent;
+    color: var(--text);
+  }
+  .btn-outline:hover { border-color: var(--primary); color: var(--primary); }
+
+  /* ─── Deploy Timeline ─── */
+  .timeline-step {
+    display: flex;
+    gap: 16px;
+    padding: 12px 0;
+    border-left: 2px solid var(--border);
+    padding-left: 24px;
+    position: relative;
+  }
+  .timeline-step::before {
+    content: '';
+    position: absolute;
+    left: -6px; top: 16px;
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    background: var(--primary);
+  }
+  .timeline-step.completed::before { background: var(--success); }
+  .timeline-step .step-num {
+    color: var(--text-muted);
+    font-size: 0.75rem;
+    min-width: 60px;
+  }
+  .timeline-step .step-label { font-weight: 600; }
+
+  /* ─── Tooltip ─── */
+  .info-tip {
+    border-bottom: 1px dashed var(--text-muted);
+    cursor: help;
+  }
+</style>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<!-- HEADER                                                        -->
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<div class="header">
+  <div class="header-logo">
+    <svg viewBox="0 0 32 32" fill="none"><rect width="32" height="32" rx="6" fill="#3b82f6"/><path d="M8 16h4v4H8zM14 8h4v16h-4zM20 12h4v8h-4z" fill="#fff" opacity="0.9"/></svg>
+    P2P Mesh Network
+    <span class="header-badge">v2.0.0</span>
+  </div>
+  <div class="header-actions">
+    <span><span class="status-dot online"></span> System Online</span>
+    <span style="color:var(--text-muted);">|</span>
+    <span style="color:var(--text-muted);" id="clock">--</span>
+    <button class="btn btn-outline" onclick="refreshData()">刷新</button>
+    <a href="#" class="btn btn-primary" onclick="document.getElementById('tab-deploy').click(); showTab('deploy')">一键部署</a>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<!-- SIDEBAR                                                       -->
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<div class="layout">
+  <aside class="sidebar">
+    <nav>
+      <ul class="sidebar-nav">
+        <li><a href="#" class="active" onclick="showTab('overview');return false">📊 总览面板</a></li>
+        <li><a href="#" onclick="showTab('architecture');return false">🏗️ 系统架构</a></li>
+        <li><a href="#" onclick="showTab('services');return false">⚙️ 服务状态</a></li>
+        <li><a href="#" onclick="showTab('topology');return false">🌐 网络拓扑</a></li>
+        <li><a href="#" onclick="showTab('metrics');return false">📈 性能指标</a></li>
+        <li><a href="#" onclick="showTab('deploy');return false">🚀 一键部署</a></li>
+      </ul>
+    </nav>
+    <div style="margin-top:32px; padding:16px; background:var(--surface2); border-radius:8px; border:1px solid var(--border);">
+      <div style="font-size:0.8rem; color:var(--text-muted); margin-bottom:8px;">部署模式</div>
+      <div style="font-weight:600; color:var(--cyan);">微服务架构</div>
+      <div style="font-size:0.75rem; color:var(--text-muted); margin-top:4px;">6 services + 4 infra</div>
+    </div>
+  </aside>
+
+  <!-- ═══════════════════════════════════════════════════════════ -->
+  <!-- MAIN CONTENT                                               -->
+  <!-- ═══════════════════════════════════════════════════════════ -->
+  <main class="main-content">
+
+    <!-- ─── Tab: Overview ──────────────────────────────────── -->
+    <div class="tab-content active" id="tab-overview">
+      <h2 style="margin-bottom:24px; color:#f3f4f6; font-size:1.5rem;">📊 系统总览</h2>
+
+      <!-- Stat Cards -->
+      <div class="grid-4" style="margin-bottom:24px;">
+        <div class="stat-card">
+          <div class="label">微服务实例</div>
+          <div class="value">6 <span style="font-size:0.9rem;color:var(--success);">running</span></div>
+          <div class="change up">↑ All healthy</div>
+        </div>
+        <div class="stat-card">
+          <div class="label">在线节点</div>
+          <div class="value" id="onlineNodes">--</div>
+          <div class="change up">↑ 12 active today</div>
+        </div>
+        <div class="stat-card">
+          <div class="label">P2P 连接数</div>
+          <div class="value" id="p2pConnections">--</div>
+          <div class="change up">↑ 85% direct</div>
+        </div>
+        <div class="stat-card">
+          <div class="label">总流量</div>
+          <div class="value">2.4 <span style="font-size:0.9rem;">GB</span></div>
+          <div class="change up">↑ 12% vs last hour</div>
+        </div>
+      </div>
+
+      <!-- Architecture diagram + service overview -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">系统架构概览</div>
+          <span class="card-subtitle">微服务 + Rust 数据面</span>
+        </div>
+        <div class="mermaid-wrapper">
+          <div class="mermaid">
+graph TB
+    subgraph "外部"
+        CLIENT[🌐 P2P Client<br/>mesh-tunnel]
+    end
+
+    subgraph "接入层"
+        NGINX[🔒 Nginx<br/>TLS 1.3 + WAF]
+    end
+
+    subgraph "控制面 Control Plane"
+        AUTH[🔐 Auth<br/>Service]
+        USER[👤 User<br/>Service]
+        SIGNAL[📡 Signaling<br/>WebSocket Hub]
+        RELAY_SVC[🔄 Relay<br/>Service]
+        USAGE[📊 Usage<br/>Service]
+        WORKER[⚡ Worker<br/>Background Jobs]
+    end
+
+    subgraph "数据面 Data Plane (Rust)"
+        RELAY[🟢 mesh-relay<br/>UDP Forwarder]
+        STUN[🔵 mesh-stun<br/>NAT Discovery]
+        TUNNEL[🟣 mesh-tunnel<br/>Client Endpoint]
+        OVERLAY[🟠 mesh-overlay<br/>TUN Routing]
+    end
+
+    subgraph "基础设施"
+        PG[(🗄️ PostgreSQL<br/>16)]
+        REDIS[(⚡ Redis<br/>7)]
+        PROM[📈 Prometheus]
+        GRAFANA[📊 Grafana]
+    end
+
+    CLIENT -->|HTTPS/WSS| NGINX
+    NGINX --> AUTH
+    NGINX --> USER
+    NGINX --> SIGNAL
+    NGINX --> RELAY_SVC
+    NGINX --> USAGE
+    AUTH --> PG
+    AUTH --> REDIS
+    USER --> PG
+    RELAY_SVC --> RELAY
+    RELAY_SVC --> REDIS
+    SIGNAL --> REDIS
+    USAGE --> PG
+    WORKER --> PG
+    WORKER --> REDIS
+    CLIENT -.->|P2P UDP| CLIENT
+    CLIENT -.->|Relay UDP| RELAY
+    CLIENT -->|STUN| STUN
+    CLIENT -->|Overlay| OVERLAY
+    PROM --> AUTH
+    PROM --> USER
+    PROM --> RELAY
+    GRAFANA --> PROM
+
+    style CLIENT fill:#1a2335,stroke:#8b5cf6
+    style RELAY fill:#1a2335,stroke:#10b981
+    style STUN fill:#1a2335,stroke:#3b82f6
+    style NGINX fill:#1a2335,stroke:#f59e0b
+          </div>
+        </div>
+      </div>
+
+      <!-- Quick Stats Row -->
+      <div class="grid-3">
+        <div class="card">
+          <div class="card-title">部署信息</div>
+          <table style="margin-top:12px;">
+            <tr><td style="color:var(--text-muted);">版本</td><td>v2.0.0</td></tr>
+            <tr><td style="color:var(--text-muted);">架构</td><td>Microservices</td></tr>
+            <tr><td style="color:var(--text-muted);">数据库</td><td>PostgreSQL 16</td></tr>
+            <tr><td style="color:var(--text-muted);">缓存</td><td>Redis 7 Cluster</td></tr>
+            <tr><td style="color:var(--text-muted);">数据面</td><td>Rust (Data Plane)</td></tr>
+          </table>
+        </div>
+        <div class="card">
+          <div class="card-title">端口映射</div>
+          <table style="margin-top:12px;">
+            <tr><td style="color:var(--text-muted);">80/443</td><td>Nginx (HTTP/HTTPS)</td></tr>
+            <tr><td style="color:var(--text-muted);">5432</td><td>PostgreSQL</td></tr>
+            <tr><td style="color:var(--text-muted);">6379</td><td>Redis</td></tr>
+            <tr><td style="color:var(--text-muted);">3478/udp</td><td>STUN Server</td></tr>
+            <tr><td style="color:var(--text-muted);">51821/udp</td><td>Relay Node</td></tr>
+          </table>
+        </div>
+        <div class="card">
+          <div class="card-title">资源使用</div>
+          <div style="margin-top:12px;">
+            <div style="display:flex;justify-content:space-between;font-size:0.85rem;">
+              <span>CPU</span><span style="color:var(--primary);">23%</span>
+            </div>
+            <div class="progress-bar"><div class="progress-fill blue" style="width:23%"></div></div>
+            <div style="display:flex;justify-content:space-between;font-size:0.85rem;margin-top:8px;">
+              <span>Memory</span><span style="color:var(--orange);">1.2 / 4 GB</span>
+            </div>
+            <div class="progress-bar"><div class="progress-fill orange" style="width:30%"></div></div>
+            <div style="display:flex;justify-content:space-between;font-size:0.85rem;margin-top:8px;">
+              <span>Disk</span><span style="color:var(--purple);">8.5 / 40 GB</span>
+            </div>
+            <div class="progress-bar"><div class="progress-fill purple" style="width:21%"></div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ─── Tab: Architecture ─────────────────────────────── -->
+    <div class="tab-content" id="tab-architecture">
+      <h2 style="margin-bottom:24px; color:#f3f4f6; font-size:1.5rem;">🏗️ 系统架构详解</h2>
+
+      <div class="card">
+        <div class="card-title" style="margin-bottom:16px;">完整数据流架构</div>
+        <div class="mermaid-wrapper">
+          <div class="mermaid">
+flowchart LR
+    subgraph "Peer A"
+        TUN_A[TUN Interface<br/>10.99.0.1]
+        APP_A[Application]
+    end
+
+    subgraph "Control Plane"
+        API[API Gateway]
+        WS[WebSocket<br/>Signaling]
+        DB[(Database)]
+    end
+
+    subgraph "Infrastructure"
+        STUN[STUN Server<br/>NAT Discovery]
+        RLY[Relay Node<br/>Fallback Transport]
+    end
+
+    subgraph "Peer B"
+        TUN_B[TUN Interface<br/>10.99.0.2]
+        APP_B[Application]
+    end
+
+    APP_A -->|1. Register| API
+    APP_A -->|2. Discover| WS
+    WS -->|3. Candidate| APP_A
+    APP_A -->|4. STUN Binding| STUN
+    APP_A -->|5a. Direct P2P| APP_B
+    APP_A -.->|5b. Relay Fallback| RLY
+    RLY -.->|Forward| APP_B
+
+    style APP_A fill:#1a2335,stroke:#8b5cf6
+    style APP_B fill:#1a2335,stroke:#8b5cf6
+    style RLY fill:#1a2335,stroke:#10b981
+    style STUN fill:#1a2335,stroke:#3b82f6
+          </div>
+        </div>
+      </div>
+
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-title">控制面 (Control Plane)</div>
+          <div class="card-subtitle" style="margin-bottom:12px;">Python/FastAPI — 业务逻辑层</div>
+          <table>
+            <tr><th>服务</th><th>职责</th><th>端口</th></tr>
+            <tr><td>Auth Service</td><td>认证、注册、令牌管理</td><td>8001</td></tr>
+            <tr><td>User Service</td><td>用户、设备、配置</td><td>8002</td></tr>
+            <tr><td>Signaling</td><td>WebSocket 信令中心</td><td>8003</td></tr>
+            <tr><td>Relay Service</td><td>中继节点管理</td><td>8004</td></tr>
+            <tr><td>Usage Service</td><td>流量计费、配额</td><td>8005</td></tr>
+            <tr><td>Worker</td><td>后台任务处理</td><td>-</td></tr>
+          </table>
+        </div>
+        <div class="card">
+          <div class="card-title">数据面 (Data Plane)</div>
+          <div class="card-subtitle" style="margin-bottom:12px;">Rust — 高性能网络层</div>
+          <table>
+            <tr><th>组件</th><th>职责</th><th>协议</th></tr>
+            <tr><td>mesh-tunnel</td><td>P2P 客户端端点</td><td>QUIC/UDP</td></tr>
+            <tr><td>mesh-relay</td><td>UDP 中继转发</td><td>UDP</td></tr>
+            <tr><td>mesh-stun</td><td>NAT 类型发现</td><td>STUN</td></tr>
+            <tr><td>mesh-overlay</td><td>全功能 Overlay 节点</td><td>TUN/IP</td></tr>
+            <tr><td>Crypto</td><td>端到端加密</td><td>Noise+ChaCha20</td></tr>
+            <tr><td>AI Routing</td><td>智能路径优化</td><td>ML-based</td></tr>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ─── Tab: Services ─────────────────────────────────── -->
+    <div class="tab-content" id="tab-services">
+      <h2 style="margin-bottom:24px; color:#f3f4f6; font-size:1.5rem;">⚙️ 服务状态</h2>
+
+      <div class="service-grid">
+        <div class="service-card">
+          <div class="svc-name">Auth Service</div>
+          <div class="svc-port">Port: 8001</div>
+          <div class="svc-status running">● Running</div>
+          <div style="font-size:0.75rem; color:var(--text-muted); margin-top:8px;">JWT + OAuth2.0</div>
+        </div>
+        <div class="service-card">
+          <div class="svc-name">User Service</div>
+          <div class="svc-port">Port: 8002</div>
+          <div class="svc-status running">● Running</div>
+          <div style="font-size:0.75rem; color:var(--text-muted); margin-top:8px;">Devices & Profiles</div>
+        </div>
+        <div class="service-card">
+          <div class="svc-name">Signaling Service</div>
+          <div class="svc-port">Port: 8003</div>
+          <div class="svc-status running">● Running</div>
+          <div style="font-size:0.75rem; color:var(--text-muted); margin-top:8px;">WebSocket Hub</div>
+        </div>
+        <div class="service-card">
+          <div class="svc-name">Relay Service</div>
+          <div class="svc-port">Port: 8004</div>
+          <div class="svc-status running">● Running</div>
+          <div style="font-size:0.75rem; color:var(--text-muted); margin-top:8px;">Node Manager</div>
+        </div>
+        <div class="service-card">
+          <div class="svc-name">Usage Service</div>
+          <div class="svc-port">Port: 8005</div>
+          <div class="svc-status running">● Running</div>
+          <div style="font-size:0.75rem; color:var(--text-muted); margin-top:8px;">Billing & Quotas</div>
+        </div>
+        <div class="service-card">
+          <div class="svc-name">Background Worker</div>
+          <div class="svc-port">Internal</div>
+          <div class="svc-status running">● Running</div>
+          <div style="font-size:0.75rem; color:var(--text-muted); margin-top:8px;">Async Jobs</div>
+        </div>
+        <div class="service-card">
+          <div class="svc-name">PostgreSQL</div>
+          <div class="svc-port">Port: 5432</div>
+          <div class="svc-status running">● Running</div>
+          <div style="font-size:0.75rem; color:var(--text-muted); margin-top:8px;">v16 — Primary</div>
+        </div>
+        <div class="service-card">
+          <div class="svc-name">Redis</div>
+          <div class="svc-port">Port: 6379</div>
+          <div class="svc-status running">● Running</div>
+          <div style="font-size:0.75rem; color:var(--text-muted); margin-top:8px;">v7 — Cache</div>
+        </div>
+        <div class="service-card">
+          <div class="svc-name">Nginx</div>
+          <div class="svc-port">Port: 80/443</div>
+          <div class="svc-status running">● Running</div>
+          <div style="font-size:0.75rem; color:var(--text-muted); margin-top:8px;">TLS + WAF</div>
+        </div>
+        <div class="service-card">
+          <div class="svc-name">Prometheus</div>
+          <div class="svc-port">Port: 9090</div>
+          <div class="svc-status running">● Running</div>
+          <div style="font-size:0.75rem; color:var(--text-muted); margin-top:8px;">Metrics</div>
+        </div>
+        <div class="service-card">
+          <div class="svc-name">Grafana</div>
+          <div class="svc-port">Port: 3000</div>
+          <div class="svc-status running">● Running</div>
+          <div style="font-size:0.75rem; color:var(--text-muted); margin-top:8px;">Dashboards</div>
+        </div>
+        <div class="service-card">
+          <div class="svc-name">Jaeger</div>
+          <div class="svc-port">Port: 16686</div>
+          <div class="svc-status running">● Running</div>
+          <div style="font-size:0.75rem; color:var(--text-muted); margin-top:8px;">Tracing</div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:24px;">
+        <div class="card-title">健康检查历史</div>
+        <div class="chart-box">
+          <canvas id="healthChart"></canvas>
+        </div>
+      </div>
+    </div>
+
+    <!-- ─── Tab: Topology ─────────────────────────────────── -->
+    <div class="tab-content" id="tab-topology">
+      <h2 style="margin-bottom:24px; color:#f3f4f6; font-size:1.5rem;">🌐 网络拓扑</h2>
+
+      <div class="card">
+        <div class="card-title" style="margin-bottom:16px;">P2P Mesh 网络拓扑图</div>
+        <div class="mermaid-wrapper">
+          <div class="mermaid">
+graph TD
+    subgraph "Region: us-east-1"
+        R1[Relay Node<br/>east-1]
+        S1[STUN Server<br/>east]
+        C1[Client A<br/>Full Cone NAT]
+        C2[Client B<br/>Restricted NAT]
+    end
+
+    subgraph "Region: eu-west-1"
+        R2[Relay Node<br/>west-1]
+        S2[STUN Server<br/>west]
+        C3[Client C<br/>Symmetric NAT]
+        C4[Client D<br/>Open NAT]
+    end
+
+    subgraph "Central"
+        CP[Control Plane<br/>API + DB]
+    end
+
+    C1 <==>|Direct P2P| C2
+    C4 <==>|Direct P2P| C1
+    C3 -.->|Relay via R1| C1
+    C3 -.->|Relay via R2| C4
+    R1 --- CP
+    R2 --- CP
+    C1 --> S1
+    C3 --> S2
+    C4 --> S2
+
+    style R1 fill:#1a2335,stroke:#10b981
+    style R2 fill:#1a2335,stroke:#10b981
+    style CP fill:#1a2335,stroke:#f59e0b
+    style C1 fill:#1a2335,stroke:#8b5cf6
+    style C2 fill:#1a2335,stroke:#8b5cf6
+    style C3 fill:#1a2335,stroke:#8b5cf6
+    style C4 fill:#1a2335,stroke:#8b5cf6
+          </div>
+        </div>
+      </div>
+
+      <div class="grid-2" style="margin-top:24px;">
+        <div class="card">
+          <div class="card-title">NAT 穿透策略</div>
+          <table>
+            <tr><th>NAT 类型</th><th>穿透方式</th><th>成功率</th></tr>
+            <tr><td>Full Cone</td><td>直接 P2P</td><td style="color:var(--success);">95%</td></tr>
+            <tr><td>Restricted Cone</td><td>UDP Hole Punch</td><td style="color:var(--success);">85%</td></tr>
+            <tr><td>Port Restricted</td><td>UDP Hole Punch</td><td style="color:var(--warning);">70%</td></tr>
+            <tr><td>Symmetric</td><td>Relay 中转</td><td style="color:var(--danger);">100%*</td></tr>
+          </table>
+          <div style="font-size:0.75rem; color:var(--text-muted); margin-top:8px;">* Symmetric NAT 无法直接 P2P，100% 通过 Relay</div>
+        </div>
+        <div class="card">
+          <div class="card-title">节点分布</div>
+          <div class="chart-box">
+            <canvas id="topologyChart"></canvas>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ─── Tab: Metrics ──────────────────────────────────── -->
+    <div class="tab-content" id="tab-metrics">
+      <h2 style="margin-bottom:24px; color:#f3f4f6; font-size:1.5rem;">📈 性能指标</h2>
+
+      <div class="grid-2" style="margin-bottom:24px;">
+        <div class="card">
+          <div class="card-title">吞吐量 (Throughput)</div>
+          <div class="chart-box">
+            <canvas id="throughputChart"></canvas>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-title">延迟分布 (Latency)</div>
+          <div class="chart-box">
+            <canvas id="latencyChart"></canvas>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-title">连接类型分布</div>
+          <div class="chart-box">
+            <canvas id="connectionChart"></canvas>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-title">API 响应时间 (p95)</div>
+          <table>
+            <tr><th>端点</th><th>p50</th><th>p95</th><th>p99</th></tr>
+            <tr><td>POST /auth/login</td><td>45ms</td><td>120ms</td><td style="color:var(--warning);">250ms</td></tr>
+            <tr><td>GET /devices</td><td>12ms</td><td>35ms</td><td>80ms</td></tr>
+            <tr><td>POST /traffic/report</td><td>8ms</td><td>22ms</td><td>50ms</td></tr>
+            <tr><td>WS Signaling</td><td>5ms</td><td>15ms</td><td>30ms</td></tr>
+            <tr><td>GET /relay</td><td>18ms</td><td>55ms</td><td>110ms</td></tr>
+          </table>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:24px;">
+        <div class="card-title">安全统计</div>
+        <div class="grid-3">
+          <div style="text-align:center; padding:16px;">
+            <div style="font-size:2rem; font-weight:700; color:var(--success);">0</div>
+            <div style="color:var(--text-muted);">未授权访问</div>
+          </div>
+          <div style="text-align:center; padding:16px;">
+            <div style="font-size:2rem; font-weight:700; color:var(--primary);">128</div>
+            <div style="color:var(--text-muted);">速率限制触发</div>
+          </div>
+          <div style="text-align:center; padding:16px;">
+            <div style="font-size:2rem; font-weight:700; color:var(--purple);">100%</div>
+            <div style="color:var(--text-muted);">流量加密率</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ─── Tab: Deploy ───────────────────────────────────── -->
+    <div class="tab-content" id="tab-deploy">
+      <h2 style="margin-bottom:24px; color:#f3f4f6; font-size:1.5rem;">🚀 一键部署</h2>
+
+      <div class="grid-2" style="margin-bottom:24px;">
+        <!-- Server Deploy -->
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <div class="card-title">🖥️ 服务端部署</div>
+              <div class="card-subtitle">在 VPS/服务器上一键部署</div>
+            </div>
+            <span class="header-badge">Linux</span>
+          </div>
+          <div class="code-block">
+            <button class="copy-btn" onclick="copyCode(this, 'server-code')">复制</button>
+            <code id="server-code">
+<span class="prompt"># 克隆项目</span>
+<span class="cmd">git</span> clone &lt;repo&gt; /opt/p2p-mesh
+<span class="cmd">cd</span> /opt/p2p-mesh
+
+<span class="prompt"># 一键部署 (需要 root)</span>
+<span class="cmd">sudo bash</span> deploy.sh server --domain mesh.yourdomain.com
+
+<span class="prompt"># 或使用交互式菜单</span>
+<span class="cmd">sudo bash</span> deploy.sh
+            </code>
+          </div>
+          <div style="margin-top:12px;">
+            <div class="timeline-step completed">
+              <span class="step-num">Step 1</span>
+              <span class="step-label">安装 Docker + 依赖</span>
+            </div>
+            <div class="timeline-step completed">
+              <span class="step-num">Step 2</span>
+              <span class="step-label">生成安全密钥</span>
+            </div>
+            <div class="timeline-step completed">
+              <span class="step-num">Step 3</span>
+              <span class="step-label">构建 Docker 镜像</span>
+            </div>
+            <div class="timeline-step">
+              <span class="step-num">Step 4</span>
+              <span class="step-label">启动所有服务</span>
+            </div>
+            <div class="timeline-step">
+              <span class="step-num">Step 5</span>
+              <span class="step-label">配置 SSL + 防火墙</span>
+            </div>
+            <div class="timeline-step">
+              <span class="step-num">Step 6</span>
+              <span class="step-label">健康验证</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Client Deploy -->
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <div class="card-title">💻 客户端部署</div>
+              <div class="card-subtitle">在终端设备上一键部署</div>
+            </div>
+            <div style="display:flex;gap:8px;">
+              <span class="header-badge">Linux</span>
+              <span class="header-badge">Windows</span>
+            </div>
+          </div>
+
+          <!-- Linux Client -->
+          <div style="margin-bottom:16px;">
+            <div style="font-weight:600; margin-bottom:8px; color:var(--cyan);">🐧 Linux</div>
+            <div class="code-block">
+              <button class="copy-btn" onclick="copyCode(this, 'client-linux-code')">复制</button>
+              <code id="client-linux-code">
+<span class="prompt"># 安装并配置</span>
+<span class="cmd">bash</span> scripts/deploy-client.sh \
+  --server https://mesh.yourdomain.com \
+  --token &lt;your_auth_token&gt;
+
+<span class="prompt"># 查看状态</span>
+<span class="cmd">systemctl status</span> p2p-mesh-tunnel
+              </code>
+            </div>
+          </div>
+
+          <!-- Windows Client -->
+          <div>
+            <div style="font-weight:600; margin-bottom:8px; color:var(--cyan);">🪟 Windows (PowerShell 管理员)</div>
+            <div class="code-block">
+              <button class="copy-btn" onclick="copyCode(this, 'client-win-code')">复制</button>
+              <code id="client-win-code">
+<span class="prompt"># 部署客户端</span>
+.\scripts\deploy-client.ps1 `
+  -Server "https://mesh.yourdomain.com" `
+  -Token "&lt;token&gt;"
+
+<span class="prompt"># 查看状态</span>
+Get-Service P2PMeshTunnel
+              </code>
+            </div>
+          </div>
+
+          <!-- Docker Client -->
+          <div style="margin-top:16px;">
+            <div style="font-weight:600; margin-bottom:8px; color:var(--cyan);">🐳 Docker (任意平台)</div>
+            <div class="code-block">
+              <button class="copy-btn" onclick="copyCode(this, 'client-docker-code')">复制</button>
+              <code id="client-docker-code">
+<span class="prompt"># 构建客户端镜像</span>
+<span class="cmd">docker build</span> -f deployment/Dockerfile.tunnel \
+  -t p2p-mesh-tunnel data-plane/
+
+<span class="prompt"># 运行</span>
+<span class="cmd">docker run -d</span> --network host \
+  -e API_URL=https://mesh.yourdomain.com \
+  -e AUTH_TOKEN=&lt;token&gt; \
+  p2p-mesh-tunnel
+              </code>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Quick Start -->
+      <div class="card">
+        <div class="card-title">⚡ 快速体验 (开发环境)</div>
+        <div class="card-subtitle" style="margin-bottom:16px;">本地一键启动所有服务，无需配置</div>
+        <div class="code-block">
+          <button class="copy-btn" onclick="copyCode(this, 'quick-start-code')">复制</button>
+          <code id="quick-start-code">
+<span class="prompt"># 方式 1: 使用总控脚本</span>
+<span class="cmd">bash</span> deploy.sh quick
+
+<span class="prompt"># 方式 2: 直接使用 docker compose</span>
+<span class="cmd">cd</span> deployment
+<span class="cmd">docker compose</span> -f docker-compose.microservices.yml --env-file .env up -d
+          </code>
+        </div>
+        <div style="margin-top:12px; padding:12px; background:rgba(245,158,11,0.1); border-radius:8px; border:1px solid rgba(245,158,11,0.3);">
+          <span style="color:var(--warning);">⚠️ 此模式仅用于开发和体验，自动生成弱密钥，不应用于生产环境。</span>
+        </div>
+        <div style="display:flex;gap:16px;margin-top:16px;flex-wrap:wrap;">
+          <div style="flex:1; min-width:200px;">
+            <div style="color:var(--text-muted); font-size:0.8rem;">API</div>
+            <div style="font-weight:600; color:var(--cyan);">http://localhost</div>
+          </div>
+          <div style="flex:1; min-width:200px;">
+            <div style="color:var(--text-muted); font-size:0.8rem;">Grafana</div>
+            <div style="font-weight:600; color:var(--cyan);">http://localhost:3000</div>
+          </div>
+          <div style="flex:1; min-width:200px;">
+            <div style="color:var(--text-muted); font-size:0.8rem;">Prometheus</div>
+            <div style="font-weight:600; color:var(--cyan);">http://localhost:9090</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Environment Config -->
+      <div class="card" style="margin-top:24px;">
+        <div class="card-title">⚙️ 环境配置参考</div>
+        <table>
+          <tr><th>变量</th><th>说明</th><th>生成方式</th></tr>
+          <tr><td>POSTGRES_PASSWORD</td><td>数据库密码</td><td><code>openssl rand -hex 32</code></td></tr>
+          <tr><td>REDIS_PASSWORD</td><td>Redis 密码</td><td><code>openssl rand -hex 32</code></td></tr>
+          <tr><td>JWT_SECRET</td><td>JWT 签名密钥</td><td><code>openssl rand -hex 64</code></td></tr>
+          <tr><td>RELAY_AUTH_TOKEN</td><td>中继认证令牌</td><td><code>openssl rand -hex 64</code></td></tr>
+          <tr><td>INTERNAL_API_KEY</td><td>服务间认证</td><td><code>openssl rand -hex 32</code></td></tr>
+          <tr><td>GRAFANA_PASSWORD</td><td>Grafana 密码</td><td><code>openssl rand -hex 16</code></td></tr>
+        </table>
+        <div style="margin-top:12px; color:var(--text-muted); font-size:0.85rem;">
+          部署脚本会自动生成所有密钥并保存到 <code>deployment/.env</code>，无需手动设置。
+        </div>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<!-- SCRIPTS                                                       -->
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<script>
+// ─── Mermaid Init ───
+mermaid.initialize({
+  startOnLoad: true,
+  theme: 'dark',
+  themeVariables: {
+    primaryColor: '#1a2335',
+    primaryTextColor: '#d1d5db',
+    primaryBorderColor: '#2a3550',
+    lineColor: '#3b82f6',
+    secondaryColor: '#141b2d',
+    tertiaryColor: '#0a0e17'
+  }
+});
+
+// ─── Clock ───
+function updateClock() {
+  const now = new Date();
+  document.getElementById('clock').textContent = now.toLocaleString('zh-CN');
+}
+updateClock();
+setInterval(updateClock, 1000);
+
+// ─── Tab Switching ───
+function showTab(tabName) {
+  document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.sidebar-nav a').forEach(a => a.classList.remove('active'));
+  const tab = document.getElementById('tab-' + tabName);
+  if (tab) tab.classList.add('active');
+  document.querySelectorAll('.sidebar-nav a').forEach(a => {
+    if (a.getAttribute('onclick') && a.getAttribute('onclick').includes(tabName)) {
+      a.classList.add('active');
+    }
+  });
+  // Refresh charts when tab becomes visible
+  setTimeout(renderCharts, 200);
+}
+
+// ─── Copy Code ───
+function copyCode(btn, codeId) {
+  const code = document.getElementById(codeId);
+  if (!code) return;
+  // Get text without HTML
+  const text = code.innerText;
+  navigator.clipboard.writeText(text).then(() => {
+    const orig = btn.textContent;
+    btn.textContent = '已复制!';
+    btn.style.color = '#10b981';
+    btn.style.borderColor = '#10b981';
+    setTimeout(() => {
+      btn.textContent = orig;
+      btn.style.color = '';
+      btn.style.borderColor = '';
+    }, 2000);
+  });
+}
+
+// ─── Refresh Data ───
+function refreshData() {
+  // Simulate live data refresh
+  const nodesEl = document.getElementById('onlineNodes');
+  const connsEl = document.getElementById('p2pConnections');
+  if (nodesEl) nodesEl.textContent = Math.floor(Math.random() * 50 + 20);
+  if (connsEl) connsEl.textContent = Math.floor(Math.random() * 200 + 50);
+  renderCharts();
+}
+
+// ─── Charts ───
+let charts = {};
+
+function destroyCharts() {
+  Object.values(charts).forEach(c => c.destroy());
+  charts = {};
+}
+
+function renderCharts() {
+  destroyCharts();
+
+  // Health Chart
+  const healthCtx = document.getElementById('healthChart');
+  if (healthCtx) {
+    charts.health = new Chart(healthCtx, {
+      type: 'line',
+      data: {
+        labels: ['00:00','02:00','04:00','06:00','08:00','10:00','12:00','14:00','16:00','18:00','20:00','22:00'],
+        datasets: [
+          { label: 'Auth', data: [1,1,1,1,1,1,1,1,1,1,1,1], borderColor: '#3b82f6', tension: 0.3, fill: false },
+          { label: 'User', data: [1,1,1,1,1,1,1,1,1,1,1,1], borderColor: '#8b5cf6', tension: 0.3, fill: false },
+          { label: 'Relay', data: [1,1,1,1,0.8,1,1,1,1,1,1,1], borderColor: '#10b981', tension: 0.3, fill: false }
+        ]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { labels: { color: '#6b7280' } } },
+        scales: {
+          x: { ticks: { color: '#6b7280' }, grid: { color: '#1a2335' } },
+          y: { min: 0, max: 1.2, ticks: { color: '#6b7280', callback: v => v === 1 ? 'Healthy' : v === 0 ? 'Down' : v }, grid: { color: '#1a2335' } }
+        }
+      }
+    });
+  }
+
+  // Topology Chart
+  const topoCtx = document.getElementById('topologyChart');
+  if (topoCtx) {
+    charts.topology = new Chart(topoCtx, {
+      type: 'doughnut',
+      data: {
+        labels: ['Direct P2P (65%)', 'Relay (20%)', 'Overlay (15%)'],
+        datasets: [{ data: [65, 20, 15], backgroundColor: ['#8b5cf6', '#10b981', '#3b82f6'], borderColor: '#0a0e17' }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { position: 'bottom', labels: { color: '#6b7280', padding: 16 } } }
+      }
+    });
+  }
+
+  // Throughput Chart
+  const tpCtx = document.getElementById('throughputChart');
+  if (tpCtx) {
+    charts.throughput = new Chart(tpCtx, {
+      type: 'bar',
+      data: {
+        labels: ['P2P Direct', 'Relay', 'QUIC', 'Overlay'],
+        datasets: [{ label: 'Mbps', data: [850, 320, 620, 480], backgroundColor: ['#8b5cf6', '#10b981', '#3b82f6', '#f97316'] }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { ticks: { color: '#6b7280' }, grid: { display: false } },
+          y: { ticks: { color: '#6b7280' }, grid: { color: '#1a2335' } }
+        }
+      }
+    });
+  }
+
+  // Latency Chart
+  const latCtx = document.getElementById('latencyChart');
+  if (latCtx) {
+    charts.latency = new Chart(latCtx, {
+      type: 'line',
+      data: {
+        labels: ['0-5ms','5-10ms','10-20ms','20-50ms','50-100ms','100ms+'],
+        datasets: [{
+          label: 'P2P Direct', data: [45,30,15,7,2,1],
+          borderColor: '#8b5cf6', backgroundColor: 'rgba(139,92,246,0.1)', fill: true, tension: 0.4
+        }, {
+          label: 'Via Relay', data: [0,5,15,30,30,20],
+          borderColor: '#f59e0b', backgroundColor: 'rgba(245,158,11,0.1)', fill: true, tension: 0.4
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { labels: { color: '#6b7280' } } },
+        scales: {
+          x: { ticks: { color: '#6b7280' }, grid: { color: '#1a2335' } },
+          y: { ticks: { color: '#6b7280' }, grid: { color: '#1a2335' } }
+        }
+      }
+    });
+  }
+
+  // Connection Chart
+  const connCtx = document.getElementById('connectionChart');
+  if (connCtx) {
+    charts.connection = new Chart(connCtx, {
+      type: 'pie',
+      data: {
+        labels: ['Direct P2P (65%)', 'Relay Fallback (20%)', 'Overlay TUN (15%)'],
+        datasets: [{ data: [65, 20, 15], backgroundColor: ['#8b5cf6', '#10b981', '#3b82f6'], borderColor: '#0a0e17' }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { position: 'bottom', labels: { color: '#6b7280', padding: 16 } } }
+      }
+    });
+  }
+}
+
+// ─── Initial Render ───
+document.addEventListener('DOMContentLoaded', function() {
+  refreshData();
+  // Auto-refresh every 30 seconds
+  setInterval(refreshData, 30000);
+});
+
+// ─── Keyboard Shortcuts ───
+document.addEventListener('keydown', function(e) {
+  if (e.ctrlKey || e.metaKey) {
+    switch(e.key) {
+      case '1': e.preventDefault(); showTab('overview'); break;
+      case '2': e.preventDefault(); showTab('architecture'); break;
+      case '3': e.preventDefault(); showTab('services'); break;
+      case '4': e.preventDefault(); showTab('topology'); break;
+      case '5': e.preventDefault(); showTab('metrics'); break;
+      case '6': e.preventDefault(); showTab('deploy'); break;
+    }
+  }
+});
+</script>
+
+</body>
+</html>

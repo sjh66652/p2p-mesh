@@ -1,0 +1,127 @@
+# P2P Mesh Network — Mesh Tunnel Client Dockerfile
+# Multi-stage build for deploying the P2P client endpoint.
+# Builds the mesh-tunnel binary and packages it in a minimal container.
+#
+# Usage:
+#   docker build -f deployment/Dockerfile.tunnel -t p2p-mesh-tunnel data-plane/
+#   docker run -d \
+#     --name mesh-tunnel \
+#     --network host \
+#     --cap-add NET_ADMIN \
+#     --device /dev/net/tun \
+#     -e API_URL=https://mesh.yourdomain.com \
+#     -e AUTH_TOKEN=your_token_here \
+#     -e LISTEN_PORT=51820 \
+#     -v $HOME/.config/p2p-mesh:/config \
+#     p2p-mesh-tunnel
+
+# ---- Build Stage ----
+FROM rust:latest AS builder
+
+WORKDIR /build
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    pkg-config \
+    libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy Cargo.toml first for dependency caching
+COPY Cargo.toml Cargo.lock* ./
+
+# Create minimal source structure to cache dependencies
+RUN mkdir -p src/bin src/crypto src/tunnel src/relay src/stun src/puncher src/quic src/multipath src/metrics src/ice src/tun src/overlay src/mesh_routing src/ipam src/acl src/dns src/mobile src/dpdk src/ebpf src/fastpath src/io_uring src/ai_routing src/quic_multipath src/smart_relay src/post_quantum src/router src/decentralized && \
+    echo 'fn main() {}' > src/main.rs && \
+    echo 'pub mod crypto; pub mod stun; pub mod puncher; pub mod tunnel; pub mod quic; pub mod multipath; pub mod metrics; pub mod relay; pub mod ice; pub mod overlay; pub mod mesh_routing; pub mod ipam; pub mod acl; pub mod dns;' > src/lib.rs && \
+    echo 'fn main() {}' > src/bin/mesh-tunnel.rs && \
+    echo 'fn main() {}' > src/bin/mesh-relay.rs && \
+    echo 'fn main() {}' > src/bin/mesh-stun.rs && \
+    echo 'fn main() {}' > src/bin/mesh-overlay.rs && \
+    echo '' > src/crypto/mod.rs && \
+    echo '' > src/stun/mod.rs && \
+    echo '' > src/puncher/mod.rs && \
+    echo '' > src/tunnel/mod.rs && \
+    echo '' > src/quic/mod.rs && \
+    echo '' > src/multipath/mod.rs && \
+    echo '' > src/metrics/mod.rs && \
+    echo '' > src/relay/mod.rs && \
+    echo '' > src/ice/mod.rs && \
+    echo '' > src/tun/mod.rs && \
+    echo '' > src/overlay/mod.rs && \
+    echo '' > src/mesh_routing/mod.rs && \
+    echo '' > src/ipam/mod.rs && \
+    echo '' > src/acl/mod.rs && \
+    echo '' > src/dns/mod.rs && \
+    echo '' > src/mobile/mod.rs && \
+    echo '' > src/dpdk/mod.rs && \
+    echo '' > src/ebpf/mod.rs && \
+    echo '' > src/fastpath/mod.rs && \
+    echo '' > src/io_uring/mod.rs && \
+    echo '' > src/ai_routing/mod.rs && \
+    echo '' > src/quic_multipath/mod.rs && \
+    echo '' > src/smart_relay/mod.rs && \
+    echo '' > src/post_quantum/mod.rs && \
+    echo '' > src/router/mod.rs && \
+    echo '' > src/decentralized/mod.rs
+
+# Cache dependencies (ignore errors for first build)
+RUN cargo build --release --bin mesh-tunnel 2>/dev/null || true
+
+# Copy actual source and build
+COPY src/ ./src/
+RUN touch src/lib.rs
+RUN cargo build --release --bin mesh-tunnel
+
+# ---- Runtime Stage ----
+FROM debian:bookworm-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    curl \
+    iproute2 \
+    tini \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create non-root user
+RUN useradd --create-home --shell /bin/bash mesh
+RUN mkdir -p /app /config /data && chown -R mesh:mesh /app /config /data
+
+USER mesh
+WORKDIR /app
+
+# Copy the compiled binary
+COPY --from=builder /build/target/release/mesh-tunnel /app/mesh-tunnel
+
+# Copy default config template
+COPY --chown=mesh:mesh <<'EOF' /app/config.toml.default
+# P2P Mesh Tunnel Client — Default Configuration
+# Override via environment variables or mount custom config at /config/client.toml
+
+[client]
+mode = "tunnel"
+listen_port = 51820
+
+[server]
+api_url = ""
+auth_token = ""
+
+[logging]
+level = "info"
+
+[advanced]
+max_connections = 100
+heartbeat_interval = 30
+health_check_interval = 10
+quic_idle_timeout = 30
+ai_routing_enabled = false
+EOF
+
+EXPOSE 51820/udp
+
+# Use tini as init for proper signal handling
+ENTRYPOINT ["/usr/bin/tini", "--"]
+CMD ["/app/mesh-tunnel", "--config", "/config/client.toml"]
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 --start-period=10s \
+    CMD curl -sf http://localhost:51820/health || exit 1

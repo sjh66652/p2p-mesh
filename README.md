@@ -161,10 +161,121 @@ cp deployment/.env.example deployment/.env
 
 ---
 
-## Quick Start
+## 🚀 一键部署 (One-Click Deployment)
+
+项目提供了完整的自动化部署体系，覆盖服务端和客户端的三种部署方式。
+
+### 交互式部署菜单 (推荐)
 
 ```bash
-git clone <repo-url> p2p-mesh
+git clone https://github.com/sjh66652/p2p-mesh.git
+cd p2p-mesh
+sudo bash deploy.sh
+```
+
+运行后将进入交互式菜单，可选择：服务端部署、Linux/Windows 客户端部署、快速体验、查看仪表盘。
+
+### 服务端一键部署
+
+```bash
+# 在 VPS 上自动完成：Docker 安装 + 密钥生成 + 镜像构建 + 防火墙 + SSL + 健康检查
+sudo bash deploy.sh server --domain mesh.yourdomain.com
+
+# 选择单体架构 (适合小型部署)
+sudo bash deploy.sh server --arch monolith
+
+# 直接调用底层脚本
+sudo bash scripts/deploy-server.sh --domain mesh.yourdomain.com --arch microservices
+```
+
+部署脚本自动完成：
+1. 检测操作系统 (Ubuntu/Debian/CentOS)
+2. 安装 Docker Engine + Docker Compose
+3. 使用 `openssl rand` 安全生成全部 7 个密钥
+4. 构建全部 Docker 镜像 (Rust 数据面 + Python 微服务)
+5. 启动 PostgreSQL、Redis、6 个微服务、Nginx、Prometheus、Grafana、Loki、Jaeger
+6. 配置 UFW/firewalld 防火墙规则
+7. 可选 Let's Encrypt SSL 证书自动获取
+8. 健康检查 + 自动设置证书续期和日志清理 cron 任务
+
+### 客户端一键部署
+
+**Linux 客户端:**
+```bash
+bash deploy.sh client --server https://mesh.yourdomain.com --token <auth_token>
+# 或直接调用:
+bash scripts/deploy-client.sh --server https://mesh.yourdomain.com --token <auth_token>
+```
+
+**Windows 客户端 (PowerShell 管理员):**
+```powershell
+.\scripts\deploy-client.ps1 -Server "https://mesh.yourdomain.com" -Token "<auth_token>"
+```
+
+**Docker 容器化客户端 (跨平台):**
+```bash
+docker build -f deployment/Dockerfile.tunnel -t p2p-mesh-tunnel data-plane/
+docker run -d --network host \
+  -e API_URL=https://mesh.yourdomain.com \
+  -e AUTH_TOKEN=<token> \
+  p2p-mesh-tunnel
+```
+
+客户端部署自动完成：
+1. Rust 工具链检测/安装
+2. 编译 mesh-tunnel 二进制
+3. 交互式配置 (服务器地址、令牌、端口、模式)
+4. systemd 服务安装 (Linux，开机自启) / Windows Service 安装
+5. 连通性测试
+
+### 快速体验 (开发环境)
+
+```bash
+bash deploy.sh quick
+# 自动生成开发密钥，一键启动全部服务
+# 访问: http://localhost (API), http://localhost:3000 (Grafana)
+```
+
+---
+
+## 📊 可视化监控面板
+
+项目内置了一个完整的单文件监控仪表盘，无需任何后端即可运行。
+
+```bash
+# 方式 1: 通过部署脚本打开
+bash deploy.sh dashboard
+
+# 方式 2: 直接在浏览器中打开
+open dashboard/index.html   # macOS
+xdg-open dashboard/index.html  # Linux
+start dashboard/index.html  # Windows
+```
+
+### 面板功能
+
+| Tab 页 | 内容 | 快捷键 |
+|---------|------|--------|
+| 📊 总览面板 | 微服务实例数、在线节点、P2P 连接数、总流量、系统架构概览图、端口映射、资源使用率 | `Ctrl+1` |
+| 🏗️ 系统架构 | Mermaid 架构流程图、控制面/数据面详细对照表 | `Ctrl+2` |
+| ⚙️ 服务状态 | 12 个容器的实时状态卡片、健康检查历史图表 | `Ctrl+3` |
+| 🌐 网络拓扑 | 多区域 P2P 拓扑图、NAT 穿透策略表、节点分布饼图 | `Ctrl+4` |
+| 📈 性能指标 | 吞吐量柱状图、延迟分布曲线、连接类型饼图、API p95 响应时间表、安全统计 | `Ctrl+5` |
+| 🚀 一键部署 | 服务端/客户端/Docker 三种部署代码块 (一键复制)、部署步骤时间线、环境变量配置参考 | `Ctrl+6` |
+
+面板特点：
+- 单 HTML 文件，零依赖后端，可直接在任意浏览器打开
+- 使用 Mermaid.js 渲染架构图 (暗色主题)
+- 使用 Chart.js 渲染性能图表
+- 模拟实时数据自动刷新 (每 30 秒)
+- 支持键盘快捷键导航
+
+---
+
+## Quick Start (手动方式)
+
+```bash
+git clone https://github.com/sjh66652/p2p-mesh.git
 cd p2p-mesh
 
 # 1. Generate secrets (see checklist above)
@@ -306,8 +417,18 @@ p2p-mesh/
 │       ├── metrics/             # EWMA quality metrics
 │       └── bin/                 # mesh-stun, mesh-tunnel, mesh-relay, mesh-overlay
 ├── deployment/                  # Docker Compose, K8s, Nginx, Dockerfiles
+│   └── Dockerfile.tunnel        # 客户端 Docker 镜像 (多阶段构建)
 ├── monitoring/                  # Prometheus, Grafana, Loki, Promtail, Jaeger
-├── scripts/                     # setup-server.sh, verify.sh, verify-upgrade.sh
+├── dashboard/                   # 可视化监控面板
+│   └── index.html               # 单文件仪表盘 (Mermaid + Chart.js)
+├── scripts/                     # 部署和验证脚本
+│   ├── setup-server.sh          # VPS 环境初始化
+│   ├── deploy-server.sh         # 服务端一键部署
+│   ├── deploy-client.sh         # Linux 客户端一键部署
+│   ├── deploy-client.ps1        # Windows 客户端一键部署
+│   ├── verify.sh                # 部署后验证测试
+│   └── verify-upgrade.sh        # 升级验证测试
+├── deploy.sh                    # 总控部署脚本 (交互式菜单)
 ├── benchmark.py                 # Throughput benchmark suite (7 metrics)
 ├── benchmark_results.json       # Raw benchmark results (JSON)
 ├── benchmark_report.html        # Visual benchmark report
@@ -409,8 +530,46 @@ python3 benchmark.py
 
 | Strategy | Scale | Guide |
 |----------|-------|-------|
-| Single VPS + Docker Compose | ≤50 users | [Quick Start](#quick-start) |
+| 一键部署 (推荐) | Any | `sudo bash deploy.sh` |
+| Single VPS + Docker Compose | ≤50 users | [Quick Start](#quick-start-手动方式) |
 | Multi-VPS + Swarm | ≤500 users | [PRODUCTION.md](./PRODUCTION.md) |
 | Kubernetes | 500+ users | `kubectl apply -k deployment/k8s/microservices/` |
+
+---
+
+## 推送到 GitHub
+
+```bash
+# 1. 查看当前变更
+cd p2p-mesh
+git status
+
+# 2. 添加所有新文件
+git add deploy.sh dashboard/ scripts/deploy-client.ps1 \
+        scripts/deploy-client.sh scripts/deploy-server.sh \
+        deployment/Dockerfile.tunnel README.md
+
+# 3. 提交
+git commit -m "feat: add one-click deployment scripts and visual dashboard
+
+- deploy.sh: master orchestrator with interactive menu
+- scripts/deploy-server.sh: server one-click deployment (Docker + SSL + firewall + health)
+- scripts/deploy-client.sh: Linux client deployment (Rust + systemd)
+- scripts/deploy-client.ps1: Windows client deployment (PowerShell)
+- deployment/Dockerfile.tunnel: containerized client build
+- dashboard/index.html: single-file monitoring dashboard (Mermaid + Chart.js)
+- README.md: updated with deployment instructions"
+
+# 4. 推送到 GitHub
+git push origin main
+
+# 如果使用 Personal Access Token 认证:
+# git remote set-url origin https://<token>@github.com/sjh66652/p2p-mesh.git
+# git push origin main
+```
+
+> **认证说明:** GitHub 已不再支持密码认证。推送时需使用 Personal Access Token (PAT) 或 SSH Key。
+> - **PAT:** Settings → Developer settings → Personal access tokens → Generate (勾选 `repo` 权限)
+> - **SSH:** `git remote set-url origin git@github.com:sjh66652/p2p-mesh.git`
 
 ---
