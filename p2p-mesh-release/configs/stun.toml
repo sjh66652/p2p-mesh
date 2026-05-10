@@ -1,0 +1,9 @@
+# P2P Mesh Network — mesh-stun Configuration v2.0.0
+# Copy to: %ProgramData%\p2p-mesh\stun.toml (Windows) or /etc/p2p-mesh/stun.toml (Linux)
+
+[stun]
+bind = "0.0.0.0"
+port = 3478
+
+[logging]
+level = "info"

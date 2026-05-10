@@ -8,16 +8,11 @@ description = "P2P Mesh Network — Production-grade overlay mesh platform with 
 # Async runtime
 tokio = { version = "1", features = ["full"] }
 
-# TUN/TAP virtual network interface
-tun = "0.6"
-
 # libc bindings for raw file descriptor I/O
 libc = "0.2"
 
 # IP network types (CIDR, IpNet)
 ipnet = { version = "2", features = ["serde"] }
-
-# DNS protocol
 
 # JSON Schema validation for ACL policies
 jsonschema = "0.17"
@@ -92,15 +87,15 @@ ipnetwork = "0.20"
 # Optional: Android JNI bindings for mobile module (Phase 7)
 jni = { version = "0.21", optional = true }
 
+# TUN/TAP virtual network interface (Linux/macOS only; excluded on Windows)
+[target.'cfg(not(windows))'.dependencies]
+tun = "0.6"
+
 [features]
 default = []
-# Enable Android JNI bindings for mobile mesh client
 jni = ["dep:jni"]
-# Enable DPDK userspace networking (requires libdpdk-dev)
 dpdk = []
-# Enable io_uring async I/O (requires Linux 5.1+)
 io-uring = []
-# Enable post-quantum cryptography
 pqc = []
 
 [[bin]]

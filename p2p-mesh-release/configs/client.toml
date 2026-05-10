@@ -1,0 +1,24 @@
+# P2P Mesh Network — mesh-tunnel Client Configuration v2.0.0
+# Copy to: %APPDATA%\p2p-mesh\client.toml (Windows) or ~/.config/p2p-mesh/client.toml (Linux)
+
+[client]
+mode = "tunnel"
+listen_port = 51820
+
+[server]
+api_url = "https://your-mesh-server.example.com"
+# JWT auth token — set via MESH_TOKEN env var, NOT here
+ws_url = "wss://your-mesh-server.example.com/api/v1/ws"
+
+[stun]
+server = "stun.your-mesh-server.example.com:3478"
+
+[logging]
+level = "info"  # trace, debug, info, warn, error
+
+[advanced]
+max_connections = 100
+heartbeat_interval = 30
+health_check_interval = 10
+quic_idle_timeout = 30
+ai_routing_enabled = false

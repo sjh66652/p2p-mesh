@@ -1,0 +1,19 @@
+# P2P Mesh Network — mesh-relay Configuration v2.0.0
+# Copy to: %ProgramData%\p2p-mesh\relay.toml (Windows) or /etc/p2p-mesh/relay.toml (Linux)
+# Auth token is read from RELAY_AUTH_TOKEN env var, NOT from this file.
+
+[relay]
+node_id = "relay-us-east-1"
+port = 51821
+region = "us-east"
+max_connections = 1000
+bandwidth_mbps = 1000
+
+[server]
+api_url = "https://your-mesh-server.example.com"
+
+[heartbeat]
+interval_seconds = 30
+
+[logging]
+level = "info"

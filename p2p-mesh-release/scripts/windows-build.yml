@@ -1,0 +1,46 @@
+# P2P Mesh Network — Windows CI Build
+# Builds Windows native executables via GitHub Actions (has MSVC toolchain).
+# This is the recommended approach if you don't have VS 2022 locally.
+
+name: Windows Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:  # manual trigger
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build mesh-tunnel
+        run: cargo build --release --bin mesh-tunnel
+
+      - name: Build mesh-relay
+        run: cargo build --release --bin mesh-relay
+
+      - name: Build mesh-stun
+        run: cargo build --release --bin mesh-stun
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: p2p-mesh-windows-binaries
+          path: |
+            target/release/mesh-tunnel.exe
+            target/release/mesh-relay.exe
+            target/release/mesh-stun.exe
